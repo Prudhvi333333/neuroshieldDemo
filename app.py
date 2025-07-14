@@ -23,7 +23,7 @@ GCS_BUCKET_NAME = "neuroshield_safe_docs"
 
 # BigQuery details for logging unsafe document reports
 # IMPORTANT: Replace "YOUR_GCP_PROJECT_ID" with your actual Google Cloud Project ID
-BQ_PROJECT_ID = "fqkmwqpb-61mr-00mp-3824-ymblnk" # <-- Update this with your project ID
+BQ_PROJECT_ID = "" # <-- Update this with your project ID
 BQ_DATASET_ID = "neuroshield_logs"
 BQ_TABLE_ID = "scan_reports"
 # ==============================================================================

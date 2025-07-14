@@ -87,7 +87,7 @@ from typing import Any, Dict, List
 from google import genai
 from google.genai import types
  
-PROJECT_ID = "fqkmwqpb-61mr-00mp-3824-ymblnk"   # ← change me
+PROJECT_ID = ""   # ← change me
 LOCATION = "global"
 MODEL_NAME = "gemini-2.5-flash"
  

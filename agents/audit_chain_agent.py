@@ -13,7 +13,7 @@ from google.cloud import bigquery
 # --- Configuration for BigQuery ---
 # These should be consistent with your main Streamlit app.
 # It's highly recommended to fetch these from environment variables in production.
-BQ_PROJECT_ID = "fqkmwqpb-61mr-00mp-3824-ymblnk" # Replace with your actual Project ID
+BQ_PROJECT_ID = "" # Replace with your actual Project ID
 BQ_DATASET_ID = "neuroshield_logs" # Replace with your actual Dataset ID
 BQ_AUDIT_TABLE_ID = "events" # The name of the table from your schema screenshot
  
