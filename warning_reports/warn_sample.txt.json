@@ -1,0 +1,8 @@
+{
+  "SECRET: Microsoft Azure Client Secret": 6,
+  "SECRET: Stripe API Key": 1,
+  "SECRET: Private Key Block": 1,
+  "SECRET: JWT (JSON Web Token)": 1,
+  "SECRET: Generic Secret (Keyword-Based)": 4,
+  "SECRET: High-Entropy String": 1
+}

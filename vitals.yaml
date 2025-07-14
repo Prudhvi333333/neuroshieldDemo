@@ -1,0 +1,7 @@
+apiVersion: v1
+metadata:
+  askId: AIDE_0074759
+  caAgileId: '208161561816'
+  projectKey: optum-tech-university-Team_Prompt_Pirates_OI_Hackathon_2025
+  projectFriendlyName: Team_Prompt_Pirates_OI_Hackathon_2025
+  componentType: code

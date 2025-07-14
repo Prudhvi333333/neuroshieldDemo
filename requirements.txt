@@ -1,0 +1,11 @@
+google-generativeai
+streamlit
+langchain
+langgraph
+python-dotenv
+google-cloud-storage
+google-cloud-logging
+google-cloud-aiplatform
+google-cloud-storage
+google-cloud-bigquery
+
