@@ -1,0 +1,26 @@
+%%{init: {"theme": "default"}}%%
+flowchart TD
+    A[InitialAnalysisAgent] -->|classification / risk_score| Route{Route Decision}
+    Route -->|Safe| Passthrough[Passthrough]
+    Route -->|Risky| Rewrite[SafePromptAgent]
+    Route -->|Blocked or risk ≥ 0.85| Block[Block Node]
+    Passthrough --> LLM[LLM Call]
+    Rewrite --> LLM
+    LLM --> Verify[ResponseVerifierAgent]
+    Verify -->|needs evidence?| Search[WebSearchAgent]
+    Search --> Verify
+    Verify -->|may run| CodeValidate[CodeValidationAgent]
+    Verify --> Audit[AuditChainAgent]
+    Block --> Audit
+    Audit --> End((END))
+graph TD
+    A[InitialAnalysisAgent] -->|classification| B{Route}
+    B -->|Safe| P[Passthrough]
+    B -->|Risky| R[SafePromptAgent]
+    B -->|Blocked or risk ≥ 0.85| BLK[Block Node]
+    P --> L[LLM Call]
+    R --> L
+    BLK --> AU[Audit]
+    L --> V[Verify]
+    V --> AU
+    AU --> END((END))

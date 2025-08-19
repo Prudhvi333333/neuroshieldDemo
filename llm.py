@@ -1,5 +1,17 @@
 # from google import genai
 # from google.genai import types
+from typing import Any, Dict, List, Optional, Tuple
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file early
+load_dotenv()
+
+import google.generativeai as genai
+from llm_utils import call_llm_json
+
+# from google import genai
+# from google.genai import types
 # import base64
 
 # def generate():
@@ -52,29 +64,26 @@
 
 # generate()
 
-import vertexai
-from vertexai.generative_models import GenerativeModel
 
-import os
+API_KEY = os.getenv("GOOGLE_API_KEY")
+if not API_KEY:
+    raise ValueError("Fatal: GOOGLE_API_KEY not found. Ensure it is set in the .env file located in the project root.")
 
-PROJECT_ID = "PROJECT_ID"
-LOCATION = "global"
-MODEL_NAME = "gemini-2.5-flash"  # Or "gemini-1.5-pro"
+genai.configure(api_key=API_KEY)
 
+MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-pro")
 
-def call_llm(prompt, system_msg="You are a helpful assistant."):
+def call_llm(prompt: str, system_msg: str = "You are a helpful assistant.") -> str:
     """
-    Calls Gemini via Vertex AI using project credentials (no API key needed in Cloud Shell).
+    Calls Gemini via google-generativeai using the provided API key.
     """
+    full_prompt = f"{system_msg}\n\n{prompt}"
     try:
-        vertexai.init(project=PROJECT_ID, location=LOCATION)
-        model = GenerativeModel(MODEL_NAME)
-        full_prompt = f"{system_msg}\n\n{prompt}"
+        model = genai.GenerativeModel(MODEL_NAME)
         response = model.generate_content(full_prompt)
         if hasattr(response, 'text') and response.text:
             return response.text.strip()
-        else:
-            return "No response generated."
+        return "No response generated."
     except Exception as e:
-        print(f"Vertex AI Gemini call failed: {e}")
+        print(f"Generative AI Gemini call failed: {e}")
         return f"Error: {str(e)}"

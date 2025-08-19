@@ -1,79 +1,90 @@
-# agents/response_verifier_agent.py
- 
 from __future__ import annotations
- 
-import json
-from typing import Dict, Any, Optional
- 
+
+from typing import Dict, Optional, Any
+
+import re
 from .base_agent import BaseAgent, safe_json
- 
- 
-class ResponseVerifierAgent(BaseAgent):
+
+_VERDICT_RE = re.compile(r"verdict\s*[:\-]?\s*([A-Za-z ]+)", re.IGNORECASE)
+_CONF_RE = re.compile(r"confidence\s*[:\-]?\s*([0-9.]+)", re.IGNORECASE)
+
+class ResponseVerifierAgent (BaseAgent):
+
     def __init__(self):
         super().__init__("ResponseVerifierAgent")
- 
-    def run(self, prompt: str, response: str, search_results: Optional[Dict[str, Any]] = None) -> Dict:
-        """
-        Verifies the factual accuracy of the LLM response, using external search results provided
-        to guide its decision.
- 
-        Args:
-            prompt: The original user prompt.
-            response: The LLM's response to verify.
-            search_results: Dictionary containing external search results from WebSearchAgent.
-                            Expected to have a key like 'web_search_results' summarizing content,
-                            or be an empty dict if no results.
-        Returns:
-            A dictionary with 'verdict' (Factually correct|Likely hallucinated|Unverifiable) and 'reason'.
-        """
-        # Ensure search_results is a dict, even if None was passed, to prevent errors
-        search_results = search_results if search_results is not None else {}
- 
-        # Attempt to get a summary or main content from search_results
-        # Adapt this based on the actual structure of WebSearchAgent's output
-        search_context_str = ""
-        # Assuming your WebSearchAgent returns a {"web_search_results_summary": "..."} key
-        if search_results.get("web_search_results_summary"):
-            search_context_str = search_results["web_search_results_summary"]
-        elif search_results: # If there's content but not that specific key, just dump it
-            try:
-                search_context_str = json.dumps(search_results, indent=2)
-            except TypeError: # Fallback if search_results is not JSON serializable
-                search_context_str = str(search_results)
-        
-        # Construct the detailed prompt context for the verification LLM
-        context_for_verifier_llm = (
-            f"Original User Prompt:\n{prompt}\n\n"
-            f"LLM's Response to Verify:\n{response}\n\n"
-            f"--- EXTERNAL FACTUAL CONTEXT (from web search) ---\n"
-            f"{search_context_str if search_context_str else 'No relevant external search results were found for this query.'}\n"
-            f"---------------------------------------------------\n\n"
+
+    def run(self, prompt: str, response: str, search_results: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        context = f"PROMPT:\n{prompt}\n\nRESPONSE:\n{response}"
+        if search_results:
+            context += f"\n\nEVIDENCE (may contradict or support):\n{search_results}"
+
+        # Ask Gemini for free-form answer (no JSON requirement)
+        raw_text = self.reason(
+            context,
+            (
+                "You are a security verifier. Decide if the RESPONSE is Factually correct, Partially correct (minor inaccuracies or missing nuance), Factually incorrect / hallucinated, or Unverifiable. "
+                "Reply with exactly three lines:\n"
+                "Verdict: <Factually correct|Partially correct|Factually incorrect|Unverifiable>\n"
+                "Reason: <max 3 short sentences>\n"
+                "Confidence: <0-1 float>"
+            ),
         )
- 
-        # Crucial instructions to guide the verification LLM
-        instruction_for_verifier_llm = (
-            "You are a strict, objective fact-checking AI. Your task is to evaluate the 'LLM's Response to Verify' "
-            "for factual accuracy and potential hallucinations. \n\n"
-            "**Your decision MUST be based SOLELY on the 'EXTERNAL FACTUAL CONTEXT' provided.**\n"
-            "**DO NOT use any prior internal knowledge you might possess.**\n\n"
-            "Evaluate the LLM's Response based on the EXTERNAL FACTUAL CONTEXT as follows:\n"
-            "1.  **'Factually correct':** If the LLM's Response's claims are explicitly supported by, or perfectly consistent with, the EXTERNAL FACTUAL CONTEXT. Also, if the LLM's Response contains no factual claims (e.g., a greeting, an opinion not verifiable by facts) AND contains no factual errors, it is 'Factually correct'.\n"
-            "2.  **'Likely hallucinated':** If the LLM's Response makes factual claims that directly contradict the EXTERNAL FACTUAL CONTEXT, or provides information that is clearly false given the EXTERNAL FACTUAL CONTEXT.\n"
-            "3.  **'Unverifiable':** If the LLM's Response contains factual claims that CANNOT be confirmed or denied by the EXTERNAL FACTUAL CONTEXT provided (i.e., the EXTERNAL FACTUAL CONTEXT is silent on the claim or too vague).\n\n"
-            "Provide a concise 'reason' for your verdict, referencing the specific points in the EXTERNAL FACTUAL CONTEXT or the LLM's Response.\n"
-            "Return your assessment in a JSON object with the keys 'verdict' and 'reason'."
-            "\nExample JSON: { 'verdict': 'Factually correct', 'reason': 'LLM response is directly supported by search context.' }"
-            "\nExample JSON: { 'verdict': 'Likely hallucinated', 'reason': 'LLM stated X, but search context explicitly says Y.' }"
-            "\nExample JSON: { 'verdict': 'Unverifiable', 'reason': 'LLM claimed Z, but search context does not contain information about Z.' }"
-            "\n\nReturn ONLY JSON."
-        )
- 
-        raw = self.reason(
-            context_for_verifier_llm,
-            instruction_for_verifier_llm,
-        )
-        j = safe_json(raw) or {}
+
+        verdict_match = _VERDICT_RE.search(raw_text)
+        conf_match = _CONF_RE.search(raw_text)
+        verdict = (verdict_match.group(1).strip() if verdict_match else "Unverifiable")
+        try:
+            confidence = float(conf_match.group(1)) if conf_match else 0.5
+        except ValueError:
+            confidence = 0.5
+
+        # -------- Robust reason extraction --------
+        # 1) Attempt JSON parse first – Gemini sometimes replies with JSON.
+        parsed_json = safe_json(raw_text)
+        reason: str | None = None
+        if parsed_json and isinstance(parsed_json, dict):
+            for k in ("reason", "support", "explanation"):
+                if k in parsed_json and parsed_json[k]:
+                    reason = str(parsed_json[k]).strip()
+                    break
+
+        # 2) Fallback to line-based heuristics.
+        if not reason:
+            lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+
+            def _strip_bullet(line: str) -> str:
+                return line.lstrip("-•* ")
+
+            reason_line = next(
+                (ln for ln in lines if _strip_bullet(ln).lower().startswith(("reason", "support", "explanation"))),
+                None,
+            )
+
+            if not reason_line:
+                # use first informative non-metadata line
+                for ln in lines:
+                    if not ln.lower().startswith(("verdict", "confidence")):
+                        reason_line = ln
+                        break
+
+            if not reason_line and raw_text:
+                reason_line = raw_text[:300]
+
+            if reason_line:
+                reason = reason_line.split(":", 1)[1].strip() if ":" in reason_line else reason_line
+
+        # 3) Final guarantee
+        if not reason:
+            reason = "Verifier did not provide an explicit explanation."
+
+        # DEBUG logging – helps diagnose missing reasons in UI
+        import logging
+        logging.info("[Verifier] raw_output: %s", raw_text.replace("\n", " ")[:400])
+        logging.info("[Verifier] extracted_reason: %s", reason)
+
         return {
-            "verdict": j.get("verdict", "Unverifiable"),
-            "reason": j.get("reason", "Parse fail or Insufficient LLM reasoning"),
+            "verdict": verdict,
+            "reason": reason,
+            "confidence": confidence,
+            "raw_verifier_output": raw_text,
         }

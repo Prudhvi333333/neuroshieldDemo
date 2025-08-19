@@ -7,26 +7,23 @@ import datetime # Import for BigQuery timestamp
 
 import docx, fitz, streamlit as st
 
-# Required for Google Cloud integrations
-from google.cloud import storage
-from google.cloud import bigquery
+# Standard library & third-party
+import os
 
 # Assuming these imports are correctly set up and accessible
 from langgraph_core.firewall_graph import build_firewall_graph, State
 from utils.patterns import KEYWORD_PATTERNS, REGEX_PATTERNS, SECRET_PATTERNS
 
-# ==============================================================================
-# --- GCP CONFIGURATION - REPLACE WITH YOUR GCP DETAILS ---
-# ==============================================================================
-# GCS Bucket for storing original files deemed safe
-GCS_BUCKET_NAME = "neuroshield_safe_docs"
+import logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 
-# BigQuery details for logging unsafe document reports
-# IMPORTANT: Replace "YOUR_GCP_PROJECT_ID" with your actual Google Cloud Project ID
-BQ_PROJECT_ID = "" # <-- Update this with your project ID
-BQ_DATASET_ID = "neuroshield_logs"
-BQ_TABLE_ID = "scan_reports"
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# Local storage configuration – fully offline
+# ------------------------------------------------------------------------------
+WARNING_REPORTS_DIR = "warning_reports"  # where safe documents are archived
+TEST_DATA_DIR = "test_data"              # where JSON scan reports are saved
 
 
 # ╭───────────── Document-scanner helpers (Integrated with GCP) ─────────────╮
@@ -100,44 +97,30 @@ def analyze_text(text: str) -> Dict[str, int]:
     
     return dict(results) # Convert back to dict for cleaner display/storage
 
-def log_report_to_bigquery(project_id: str, dataset_id: str, table_id: str, filename: str, report_data_dict: Dict[str, Any]):
-    """Inserts a scan report into a BigQuery table."""
+def log_report_to_json(filename: str, report_data_dict: Dict[str, Any]):
+    """Write scan report to test_data/<filename>_log.json locally."""
     try:
-        client = bigquery.Client(project=project_id)
-        table_full_id = f"{project_id}.{dataset_id}.{table_id}"
-        
-        # BigQuery expects a list of dictionaries for rows.
-        # Ensure report_data_dict is JSON stringified before inserting.
-        rows_to_insert = [{
-            "filename": filename,
-            "upload_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "scan_result": "unsafe",
-            "report_data": json.dumps(report_data_dict)
-        }]
-        
-        errors = client.insert_rows_json(table_full_id, rows_to_insert)
-        if not errors:
-            st.success(f"BigQuery: Warning report for `{filename}` successfully logged.")
-        else:
-            st.error(f"BigQuery: Errors occurred while inserting rows: {errors}")
+        os.makedirs(TEST_DATA_DIR, exist_ok=True)
+        log_file_path = os.path.join(TEST_DATA_DIR, f"{Path(filename).stem}_log.json")
+        with open(log_file_path, "w", encoding="utf-8") as f:
+            json.dump(report_data_dict, f, indent=2)
+        st.success(f"Report data logged to {log_file_path} successfully.")
     except Exception as e:
-        st.error(f"BigQuery: Failed to log report: {e}")
+        st.error(f"Error logging to JSON file: {e}")
 
-def upload_to_gcs(bucket_name: str, uploaded_file_object, destination_blob_name: str):
-    """Uploads a file to the specified GCS bucket."""
+
+def save_file_locally(uploaded_file_object, destination_folder: str = WARNING_REPORTS_DIR):
+    """Save file-like object to local directory."""
     try:
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(destination_blob_name)
-        
-        # Upload using the file-like object directly
-        blob.upload_from_file(uploaded_file_object, rewind=True) 
-        
-        st.success(f"GCS: File `{destination_blob_name}` successfully uploaded to bucket `{bucket_name}`.")
+        os.makedirs(destination_folder, exist_ok=True)
+        file_path = os.path.join(destination_folder, uploaded_file_object.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file_object.getbuffer())
+        st.success(f"File `{uploaded_file_object.name}` successfully saved to `{destination_folder}`.")
     except Exception as e:
-        st.error(f"GCS: Failed to upload file: {e}")
-# ╰───────────────────────────────────────────────────────────────────╯
+        st.error(f"Failed to save file locally: {e}")
 
+# ----------------- END LOCAL HELPERS -----------------
 
 st.set_page_config("NeuroShield", layout="wide", page_icon="🛡️")
 st.title("🛡️ **NeuroShield**")
@@ -193,9 +176,11 @@ with fw_tab:
             "rewrite": "SafePromptAgent",
             "llm": "LLM Response",
             "verify": "ResponseVerifierAgent",
+            "verify_final": "ResponseVerifierAgent",  # final verifier state with reason/verdict
             "fast": "ResponseVerifierAgent", # 'fast' is a node in the graph, maps to ResponseVerifierAgent tab
             "block": "Final Results",
             "audit": "Final Results",
+            "search": "ResponseVerifierAgent",  # ensure second-pass verifier results appear
         }
 
         # Nodes that run but do not require a dedicated display tab (and shouldn't trigger warnings)
@@ -221,15 +206,30 @@ with fw_tab:
                         node_name_from_event = list(event.keys())[0]
                         payload_from_node = event[node_name_from_event]
 
+                        # Guard: some nodes may emit None; convert to empty dict
+                        if payload_from_node is None:
+                            payload_from_node = {}
+
                         current_accumulated_state.update(payload_from_node)
                         payload_for_display = payload_from_node
+                        print(f"DEBUG: Updated state with {node_name_from_event}: {list(payload_from_node.keys())}")
+                        if node_name_from_event in ['verify', 'verify_final', 'search'] and any(k in payload_from_node for k in ['reason', 'verdict', 'confidence']):
+                            print(f"DEBUG: VERIFIER EVENT {node_name_from_event} - payload: {payload_from_node}")
                     
                     if node_name_from_event:
                         label = label_map.get(node_name_from_event)
 
                         if label:
-                            placeholders[label].json(payload_for_display, expanded=True) # JSON expanded
-                            st.session_state.firewall_results[label] = payload_for_display
+                            # For verifier tab, show the **full** accumulated state so second-pass
+                            # fields (reason, confidence) appear even if this event payload came
+                            # from the 'search' node or an earlier verifier run.
+                            if label == "ResponseVerifierAgent":
+                                display_data = current_accumulated_state
+                            else:
+                                display_data = payload_for_display
+
+                            placeholders[label].json(display_data, expanded=True)
+                            st.session_state.firewall_results[label] = display_data
 
                             # Special handling for "AttackDetection" tab:
                             if label == "PromptScanAgent" and "attack_detection" in payload_for_display:
@@ -250,6 +250,16 @@ with fw_tab:
                         else:
                             st.warning(f"Node '{node_name_from_event}' completed but has no mapped UI tab or explicit skip. Event: {event}")
 
+            print("DEBUG final state keys:", list(current_accumulated_state.keys()))
+            print("DEBUG final accumulated state verifier fields:", {k: v for k, v in current_accumulated_state.items() if k in ['reason', 'verdict', 'confidence']})
+            
+            # EMERGENCY FIX: Force verifier fields into session state if missing from accumulated state
+            if 'reason' not in current_accumulated_state and 'ResponseVerifierAgent' in st.session_state.firewall_results:
+                verifier_data = st.session_state.firewall_results['ResponseVerifierAgent']
+                if isinstance(verifier_data, dict) and 'reason' in verifier_data:
+                    print("DEBUG: Forcing verifier data from session state")
+                    placeholders['ResponseVerifierAgent'].json(verifier_data, expanded=True)
+            
             st.success(f"✅ Completed in {time.perf_counter()-start:.2f} s")
 
         except Exception as e:
@@ -264,11 +274,7 @@ with fw_tab:
 # ╭────────────────────── Document Scanner (Integrated with GCP) ─────────────────────────╮
 with doc_tab:
     st.info("""
-        **GCP Integration Note:** This document scanner attempts to log sensitive findings to Google BigQuery
-        and store safe documents in Google Cloud Storage. Ensure your environment has the `GOOGLE_APPLICATION_CREDENTIALS`
-        environment variable set and that your service account has the necessary IAM permissions for BigQuery
-        (`BigQuery Data Editor`) and Cloud Storage (`Storage Object Creator`).
-        Also, ensure the BigQuery table `neuroshield_logs.scan_reports` exists with the correct schema.
+        **Local Mode:** This document scanner logs sensitive findings to JSON files in `test_data/` and archives safe documents into the `warning_reports/` folder. No internet or cloud services are required.
         """)
     
     f = st.file_uploader("Upload PDF / DOCX / TXT", type=["pdf", "docx", "txt"])
@@ -298,34 +304,29 @@ with doc_tab:
         if sensitive_patterns_found:
             # === Unsafe Document Workflow ===
             st.header("🚨 Warning: Unsafe Document Detected")
-            st.warning("The following types of potentially sensitive data were identified. This report will be logged to BigQuery.")
+            st.warning("The following sensitive data types were identified. A JSON report will be saved locally.")
             for pattern_name in sensitive_patterns_found.keys():
                 st.markdown(f"- **{pattern_name}**")
 
-            # Log the detailed report to BigQuery
-            with st.spinner("Logging warning report to BigQuery..."):
-                log_report_to_bigquery(
-                    project_id=BQ_PROJECT_ID,
-                    dataset_id=BQ_DATASET_ID,
-                    table_id=BQ_TABLE_ID,
+            # Log the detailed report to local JSON
+            with st.spinner("Saving warning report locally..."):
+                log_report_to_json(
                     filename=f.name,
                     report_data_dict=sensitive_patterns_found
                 )
         else:
             # === Safe Document Workflow ===
             st.header("✅ Document Appears Safe")
-            st.success("No sensitive data patterns were detected. This document will be archived to Google Cloud Storage.")
+            st.success("No sensitive data patterns were detected. This document will be archived locally.")
 
             # To upload, we need to rewind the uploaded file object
             # The `upload_from_file` method expects a file-like object and will read from its current position.
             # `f.seek(0)` ensures we read from the beginning.
             f.seek(0) 
 
-            # Upload the file to GCS
-            with st.spinner(f"Archiving `{f.name}` to Google Cloud Storage..."):
-                upload_to_gcs(
-                    bucket_name=GCS_BUCKET_NAME,
+            # Upload the file to local archive
+            with st.spinner(f"Archiving `{f.name}` locally to `{WARNING_REPORTS_DIR}`..."):
+                save_file_locally(
                     uploaded_file_object=f, # Pass the file-like object directly
-                    destination_blob_name=f.name
+                    destination_folder=WARNING_REPORTS_DIR
                 )
-

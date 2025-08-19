@@ -1,0 +1,19 @@
+%%{init: {"theme": "default"}}%%
+flowchart LR
+    subgraph Front-End
+        UI[Streamlit UI\n`app.py`]
+    end
+
+    subgraph Core
+        Graph["LangGraph Firewall\nbuild_firewall_graph()"]
+        Agents[LLM Agents]
+        LLM["Gemini via google-generativeai\nllm_utils.py"]
+        Logs["Local JSON logging\nlogs/audit_log.json"]
+    end
+
+    UI -->|user_prompt| Graph
+    Graph --> Agents
+    Agents --> LLM
+    Agents -->|results| Graph
+    Graph -->|state updates| UI
+    Graph -->|audit events| Logs
