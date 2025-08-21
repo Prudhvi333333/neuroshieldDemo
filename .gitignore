@@ -32,12 +32,3 @@ ENV/
 .idea/
 *.swp
 *.swo
-
-# Logs
-*.log
-
-# Test data
-test_data/
-
-# Warning reports
-warning_reports/

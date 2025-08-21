@@ -382,5 +382,15 @@
     "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"confidence\": 0}, \"pii_leakage_attempt\": {\"detected\": false, \"confidence\": 0}, \"jailbreaking_attempt\": {\"detected\": false, \"confidence\": 0}, \"malicious_code_generation\": {\"detected\": false, \"confidence\": 0}}",
     "verdict": "Factually correct",
     "context_digest": null
+  },
+  {
+    "timestamp": "2025-08-20T06:29:12.507606",
+    "user_id": null,
+    "prompt": "What is the capital of France?",
+    "classification": "Risky",
+    "risk_score": 0.8,
+    "attack_flags": "{}",
+    "verdict": "Unverifiable",
+    "context_digest": null
   }
 ]

@@ -4,6 +4,9 @@ langchain
 langgraph
 python-dotenv
 pydantic<2
+fastapi
+uvicorn[standard]
+httpx
+pytest
 PyMuPDF
 python-docx
-ERROR: Could not install requirement numpy==1.26.4 from https://files.pythonhosted.org/packages/3a/d0/edc009c2355e76785e79177d61a843588a44485501fb2946e671f681a299/numpy-1.26.4-cp313-cp313-win_amd64.whl because of HTTP error 404 Client Error: Not Found for url: https://files.pythonhosted.org/packages/3a/d0/edc009c2355e76785e79177d61a843588a44485501fb2946e671f681a299/numpy-1.26.4-cp313-cp313-win_amd64.whl for URL https://files.pythonhosted.org/packages/3a/d0/edc009c2355e76785e79177d61a843588a44485501fb2946e671f681a299/numpy-1.26.4-cp313-cp313-win_amd64.whl
