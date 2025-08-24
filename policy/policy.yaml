@@ -1,0 +1,160 @@
+version: "2025-08-25.3"
+
+limits:
+  max_prompt_len: 4000
+  max_urls: 5
+  fastpath_max_len: 300
+
+rules:
+  block_regex:
+    - '(?i)ignore\s+previous\s+instructions'
+    - '(?i)reveal\s+system\s+prompt'
+    - '(?i)bypass\s+security'
+    - '(?i)prompt\s*inject(ion)?'
+  risk_regex:
+    - '(?i)api(?:[ _-]?|\s+)key'
+    - '(?i)password'
+    - '(?i)access[_-]?token'
+    - '(?i)secret'
+    - '(?i)credential'
+  dlp_regex:
+    - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    - '(?i)\bAKIA[0-9A-Z]{16}\b'
+    - '\b(?:\d[ -]*?){13,16}\b'
+    - 'AIza[0-9A-Za-z\-_]{30,40}'
+
+# version: "2025-08-21.1"
+
+# limits:
+#   max_prompt_len: 4000      # hard cap to protect downstream
+#   max_urls: 5               # if you later pass URLs in the request
+
+# rules:
+#   # If any matches → immediate block (fast path)
+#   block_regex:
+#     - '(?i)ignore\s+previous\s+instructions'
+#     - '(?i)reveal\s+system\s+prompt'
+#     - '(?i)bypass\s+security'
+#     - '(?i)prompt\s*inject(ion)?'
+#   # Soft risk boosters (we won’t block on these alone in T0)
+#   risk_regex:
+#     - '(?i)api(?:[ _-]?|\s+)key'
+#     - '(?i)password'
+#     - '(?i)access[_-]?token'
+#     - '(?i)secret'
+#     - '(?i)credential'
+#   # Secrets / PII quick DLP (subset; guardian/sanitizer do deeper checks later)
+#   dlp_regex:
+#     - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'                 # email
+#     - '(?i)\bAKIA[0-9A-Z]{16}\b'                                           # AWS key id
+#     - '\b(?:\d[ -]*?){13,16}\b'                                            # rough CC length
+#     - 'AIza[0-9A-Za-z\-_]{30,40}'                                             # Google API Key
+
+# allow:
+#   # allow-only if you turn on strict mode later
+#   domains: []     # for tool calls, filled in Day 5
+
+# meta:
+#   description: "Tier-0 rules for ultra-fast gating"
+# version: "2025-08-21.1"
+
+# limits:
+#   max_prompt_len: 4000
+#   max_urls: 5
+#   fastpath_max_len: 300   # NEW: allow instant “allow” if under this length
+
+# flags:
+#   fastpath_enabled: true  # NEW
+
+# rules:
+#   block_regex:
+#     - '(?i)ignore\s+previous\s+instructions'
+#     - '(?i)reveal\s+system\s+prompt'
+#     - '(?i)bypass\s+security'
+#     - '(?i)prompt\s*inject(ion)?'
+#   risk_regex:
+#     - '(?i)api(?:[ _-]?|\s+)key'
+#     - '(?i)password'
+#     - '(?i)access[_-]?token'
+#     - '(?i)secret'
+#     - '(?i)credential'
+#   dlp_regex:
+#     - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+#     - '(?i)\bAKIA[0-9A-Z]{16}\b'
+#     - '\b(?:\d[ -]*?){13,16}\b'
+#     - 'AIza[0-9A-Za-z\-_]{30,40}'
+
+# allow:
+#   domains: []
+
+# meta:
+#   description: "Tier-0 rules for ultra-fast gating"
+
+# policy/policy.yaml
+# policy/policy.yaml
+version: "2025-08-25.2"
+
+caps:
+  default:
+    net_read: 5
+    net_write: 1
+    db_write: 1
+    fs_write: 0
+
+qa:
+  max_allow_anomaly: 0.25
+  block_threshold:   0.90
+
+
+timelock:
+  default_ttl_seconds: 20
+  tools: ["email.send"]   # any call to these tools must go through timelock
+
+tools:
+  - name: web.get
+    allow: true
+    domains_allow:
+      - example.com
+      - docs.python.org
+    rate:
+      max_calls: 10
+      per_seconds: 60
+      cooldown_seconds: 2
+    args_schema:
+      type: object
+      required: ["url"]
+      properties:
+        url:
+          type: string
+          format: uri
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+  - name: email.send
+    allow: false            # still disallowed directly (must use timelock)
+    rate:
+      max_calls: 0
+      per_seconds: 60
+    args_schema:
+      type: object
+      required: ["to", "subject", "body"]
+      properties:
+        to:
+          type: string
+          format: email
+        subject:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+
+  - name: shell.exec
+    allow: false
+    args_schema:
+      type: object
+      properties:
+        cmd:
+          type: string

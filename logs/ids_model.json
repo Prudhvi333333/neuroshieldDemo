@@ -1,0 +1,40 @@
+{
+  "threshold_logp": -12.0,
+  "transitions": {
+    "ingress\u2192sanitizer": 7,
+    "sanitizer\u2192t0": 7,
+    "t0\u2192t1": 6,
+    "t1\u2192graph.llm": 5,
+    "graph.llm\u2192graph.verify": 5,
+    "graph.verify\u2192guardian": 5,
+    "guardian\u2192egress": 6,
+    "t0\u2192fast_allow": 1,
+    "fast_allow\u2192egress": 1,
+    "t1\u2192rewrite": 1,
+    "rewrite\u2192graph.llm": 1,
+    "graph.llm\u2192guardian": 1
+  },
+  "out_counts": {
+    "ingress": 7,
+    "sanitizer": 7,
+    "t0": 7,
+    "t1": 6,
+    "graph.llm": 6,
+    "graph.verify": 5,
+    "guardian": 6,
+    "fast_allow": 1,
+    "rewrite": 1
+  },
+  "labels": [
+    "egress",
+    "fast_allow",
+    "graph.llm",
+    "graph.verify",
+    "guardian",
+    "ingress",
+    "rewrite",
+    "sanitizer",
+    "t0",
+    "t1"
+  ]
+}

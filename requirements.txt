@@ -10,3 +10,9 @@ httpx
 pytest
 PyMuPDF
 python-docx
+pyyaml>=6.0
+onnxruntime==1.18.0 
+scikit-learn>=1.3.0
+numpy>=1.24.0
+jsonschema>=4.21.1
+PyYAML>=6.0.1
