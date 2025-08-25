@@ -103,7 +103,16 @@ caps:
 
 qa:
   max_allow_anomaly: 0.25
-  block_threshold:   0.90
+  block_threshold: 0.85
+  fastpath_deny_regex:
+    - '(?i)\binternal\s+console\b'
+    - '(?i)\bdiagnostic\s+mode\b'
+    - '(?i)\bsystem\s+status\b'
+    - '(?i)\bread[-\s]?only\s+session\b'
+    - '(?i)\bsys(tem)?\s*prompt\b'
+
+graph:
+  max_runtime_ms: 5000   # soft cap for demo; adjust as needed
 
 
 timelock:

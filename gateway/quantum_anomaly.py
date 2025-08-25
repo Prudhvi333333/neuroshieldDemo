@@ -125,9 +125,28 @@ class QuantumAnomaly:
         if not self._fitted and not self._load():
             self.fit(_BENIGN_SEED)
 
-        # very short prompts are almost always benign questions
-        if self._token_count(text) < 4:
+        # Heuristic 1: very short prompts (≤3 tokens) – almost always benign
+        if self._token_count(text) <= 3:
             return QAResult(anomaly=0.05, dim=self.dim)
+
+        # Heuristic 2: common jailbreak / injection cues boost anomaly
+        _JB_PATTERNS = [
+            "hidden system prompt",
+            "ignore previous",
+            "override all",
+            "always respond",
+            "include the system prompt",
+            "jailbreak",
+            "diagnostic mode",
+            "internal console",
+        ]
+        if any(pat in text.lower() for pat in _JB_PATTERNS):
+            # Hard-set a suspicious anomaly high enough to trigger block path
+            return QAResult(anomaly=0.9, dim=self.dim)
+
+        # Treat short factual questions as low anomaly to trigger fast-path
+        if self._token_count(text) < 10 and any(keyword in text.lower() for keyword in ["what", "how", "when", "where", "who"]):
+            return QAResult(anomaly=0.1, dim=self.dim)
 
         X = self.vec.transform([text])
         x = self.svd.transform(X)[0]
@@ -145,7 +164,7 @@ class QuantumAnomaly:
         dist = self._mah_dist(x, self.mu, self.cov_inv)  # type: ignore
         rank = int(np.searchsorted(self.sorted_dists, dist, side="right"))  # type: ignore
         cdf = rank / float(len(self.sorted_dists))                           # type: ignore
-        anomaly = 1.0 - cdf
+        anomaly = self._tail_prob(dist)
         return float(dist), float(cdf), float(anomaly)
 
 # Singleton getter
