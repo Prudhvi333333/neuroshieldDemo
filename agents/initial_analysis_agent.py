@@ -26,6 +26,21 @@ PROMPT:
 \"\"\"{prompt}\"\"\""""
  
     def run(self, prompt: str) -> Dict[str, Any]:
+        """Return analysis dict. For dev-speed, we short-circuit obviously benign
+        prompts (no risky keywords) to avoid the expensive LLM JSON call."""
+        lower = prompt.lower()
+        _RISKY_KWS = [
+            "ignore previous", "system prompt", "\nimport ", "os.system", "secret", "password", "openai.api_key",
+            "jailbreak", "prompt injection",
+        ]
+        if not any(kw in lower for kw in _RISKY_KWS) and len(prompt) < 400:
+            return {
+                "classification": "Safe",
+                "risk_score": 0.05,
+                "reason": "Heuristic fast-path",
+                "attack_detection": {},
+            }
+        # Slow path – call LLM JSON
         formatted_prompt = self._PROMPT.format(prompt=prompt)
         raw_text = call_llm_json(formatted_prompt, "Return ONLY valid JSON.")
         parsed = safe_json(raw_text) or {}

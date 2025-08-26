@@ -43,6 +43,12 @@ def _render_tiles(ph, state: State):
             _tile(cols[0], "Code Scan", state["code_verdict"], None)
         if "hallucination_reason" in state:
             _tile(cols[1], "Hallucination", state.get("hallucination_reason", "None"), None)
+        if "risk_score" in state:
+            rcol, vcol = st.columns(2)
+            _tile(rcol, "Risk %", f"{state['risk_score']*100:.1f}%", state.get("risk_reason"))
+            if "latencies" in state:
+                total_latency = max(state["latencies"].values()) if state["latencies"] else 0.0
+                _tile(vcol, "Latency", f"{total_latency*1000:.0f} ms", None)
 
 def _render_flow(ph, labels: List[str], state: State):
     """Render vertical agent flow with tick for completed nodes."""
@@ -68,6 +74,7 @@ st.title("🛡️ NeuroShield – Security Dashboard")
 # ----------------------------------------------------------------------------
 
 a_prompt = st.text_area("Prompt ▶", height=140, key="prompt_v2")
+skip_llm = st.checkbox("Skip external LLM call (dev mode)", value=False, key="skip_llm_v2")
 use_paste = st.toggle("Paste LLM response for verification", key="paste_toggle_v2")
 a_llm_resp = st.text_area("LLM Response", height=140, key="llm_resp_v2") if use_paste else ""
 
@@ -79,7 +86,7 @@ if "events_v2" not in st.session_state:
 if st.button("Analyze Security 🚀", disabled=analyze_disabled):
     st.session_state.events_v2 = []  # reset history
     graph = build_firewall_graph()
-    init_state: State = {"user_prompt": a_prompt}
+    init_state: State = {"user_prompt": a_prompt, "skip_llm": skip_llm}
     if use_paste and a_llm_resp:
         init_state["llm_response"] = a_llm_resp
 
@@ -109,6 +116,11 @@ if st.button("Analyze Security 🚀", disabled=analyze_disabled):
             _flow_labels.append(node) if node not in _flow_labels else None
             _render_flow(flow_placeholder, _flow_labels, current_state)
             _render_tiles(tiles_placeholder, current_state)
+
+            # track latency per node in state
+            if 'latencies' not in current_state:
+                current_state['latencies'] = {}
+            current_state['latencies'][node] = time.perf_counter() - start_ts
 
     elapsed = time.perf_counter() - start_ts
     st.success(f"Completed in {elapsed:.2f}s")

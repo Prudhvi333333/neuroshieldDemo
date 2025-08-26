@@ -242,6 +242,14 @@ def _default_seq(tail: str | None = None) -> List[str]:
 def watchman_check(body: CheckRequest):
     req_id = str(uuid.uuid4()); t_start = time.time(); pol = _pol()
     # prepare t0 info container upfront
+    trace: List[str] = ["ingress", "sanitizer"]
+    def _end(resp: Dict[str, Any]) -> Dict[str, Any]:
+        """Attach latency, trace, and defaults so UI always has 'this-run' metrics."""
+        resp["latency_ms"] = int((time.time() - t_start) * 1000)
+        resp["trace"] = trace[:] + ["egress"]
+        resp.setdefault("fast_path", False)
+        resp.setdefault("model_called", False)
+        return resp
     t0_block: bool = False
     t0_reasons: List[str] = []
     policy_version = pol.get("version")
@@ -251,7 +259,7 @@ def watchman_check(body: CheckRequest):
         raise HTTPException(status_code=400, detail="prompt must not be empty")
     sanit = sanitize_report(body.prompt)
     if sanit["blocked"]:
-        return {
+        return _end({
             "decision": "Blocked",
             "risk_score": None,
             "reasons": sanit["reasons"],
@@ -261,7 +269,8 @@ def watchman_check(body: CheckRequest):
             "t1": None,
             "qa": None,
             "safety": {"label":"safe","reasons":[],"block":False,"text": None},
-        }
+        })
+
 
     sanitized_prompt = sanit["sanitized_text"]
 
@@ -272,8 +281,10 @@ def watchman_check(body: CheckRequest):
         t0_block, t0_reasons = _run_t0(sanitized_prompt, pol)
     except Exception:
         pass
+    trace.append("t0")
+
     if t0_block:
-        return {
+        return _end({
             "decision": "Blocked",
             "risk_score": 0.95,
             "t0": {"blocked": t0_block, "rules_hit": t0_reasons},
@@ -283,10 +294,12 @@ def watchman_check(body: CheckRequest):
             "t1": None,
             "qa": None,
             "safety": {"label":"safe","reasons":[],"block":False,"text":None},
-        }
+        })
 
     # ── Tier-1 classifier (light)
     t1 = _T1.classify(sanitized_prompt)
+    trace.append("t1")
+
     lex_suspect = (
         t1.scores.get("jailbreak", 0.0) >= 0.6 and
         t1.scores.get("llm_jack", 0.0) >= 0.6
@@ -324,20 +337,24 @@ def watchman_check(body: CheckRequest):
         and len(sanitized_prompt) <= FAST_MAX_LEN
         and not body.pasted_llm_response
     ):
-        return {
+        trace.append("fast_allow")
+        return _end({
             "decision": "Likely factual (fast-path)",
             "t0": {"blocked": t0_block, "rules_hit": t0_reasons},
-            "risk_score": fusion["risk"],     # 0.1
+            "risk_score": fusion["risk"],
             "reasons": ["Low-risk prompt; minimal checks applied."],
             "final_prompt": sanitized_prompt,
-            "llm_response": "",               # no LLM call here
+            "llm_response": "",
             "t1": {"scores": t1.scores, "label": t1.label, "confidence": t1.confidence},
-            "qa": ({"anomaly": qa_anomaly, "detector": "quantum-kernel-sim"} if qa_enabled and qa_anomaly is not None else None),
+            "qa": None,
             "safety": {"label":"safe","reasons":[],"block":False,"text":""},
-        }
+            "fast_path": True,
+            "model_called": False,
+        })
 
     if fusion["action"] == "block":
-        return {
+        trace.append("block")
+        return _end({
             "decision": "Blocked",
             "risk_score": fusion["risk"],
             "reasons": fusion["reasons"],
@@ -346,7 +363,7 @@ def watchman_check(body: CheckRequest):
             "t1": {"scores": t1.scores, "label": t1.label, "confidence": t1.confidence},
             "qa": ({"anomaly": qa_anomaly, "detector": "quantum-kernel-sim"} if qa_enabled and qa_anomaly is not None else None),
             "safety": {"label":"safe","reasons":[],"block":False,"text":None},
-        }
+        })
 
     if fusion["action"] == "escalate":
         jr = _JUDGE.evaluate(sanitized_prompt)
