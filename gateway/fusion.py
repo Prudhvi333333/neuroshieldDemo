@@ -1,39 +1,48 @@
 # gateway/fusion.py
-from __future__ import annotations
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 def fuse_decision(
-    t0_hits: list[str] | None,
+    t0_hits: List[str],
     t1_scores: Dict[str, float],
     anomaly: Optional[float] = None,
-    max_allow_anomaly: Optional[float] = None,
-    block_threshold: Optional[float] = None,
-) -> Dict:
+    max_allow_anomaly: float = 0.25,
+    block_threshold: float = 0.85,
+    lex_suspect: bool = False,   # NEW
+) -> Dict[str, object]:
     """
-    QA anomaly ignored (advisory). T0 + T1 decide:
-      - T0 hit -> block
-      - T1 risk >= 0.8 -> block
-      - 0.5 <= T1 risk < 0.8 -> escalate (heavy judge)
-      - else allow
+    Decide: allow | block | rewrite | escalate.
+    - t0_hits          : any hard rule matches (regex/DLP)
+    - t1_scores        : {'injection','jailbreak','llm_jack','shadow_ai'} in [0,1]
+    - anomaly          : optional (we're not using QA now; pass None)
+    - max_allow_anomaly: ignored when anomaly is None
+    - block_threshold  : threshold for hard-risk block
+    - lex_suspect      : shortcut when lexical heuristics indicate jailbreak intent
     """
-    t0_hits = t0_hits or []
-    inj = float(t1_scores.get("injection", 0.0))
-    jail = float(t1_scores.get("jailbreak", 0.0))
-    jack = float(t1_scores.get("llm_jack", 0.0))
-    shadow = float(t1_scores.get("shadow_ai", 0.0))
-    t1_risk = max(inj, jail, jack, shadow)
-
+    # T0 hard block
     if t0_hits:
-        return {"action": "block", "risk": 1.0, "reasons": ["t0:rule_hit"]}
+        return {"action": "block", "risk": 0.95, "reasons": ["rule.block_regex"]}
 
-    if t1_risk >= 0.8:
-        return {"action": "block", "risk": t1_risk, "reasons": ["t1:high_risk"]}
+    # NEW: lexical shortcut – if both jailbreak & llm_jack are high or lex_suspect, block fast
+    if lex_suspect or (
+        t1_scores.get("jailbreak", 0.0) >= 0.6 and t1_scores.get("llm_jack", 0.0) >= 0.6
+    ):
+        return {"action": "block", "risk": 0.95, "reasons": ["t1.lex_suspect"]}
 
-    if t1_risk >= 0.5 or (anomaly is not None and anomaly >= 0.5):
-        return {"action": "escalate", "risk": max(t1_risk, anomaly or 0.0), "reasons": ["t1_or_anomaly:uncertain"]}
+    # Risk score from T1 (simple max fusion)
+    risk = max(
+        t1_scores.get("injection", 0.0),
+        t1_scores.get("jailbreak", 0.0),
+        t1_scores.get("llm_jack", 0.0),
+        t1_scores.get("shadow_ai", 0.0),
+    )
 
-    # treat moderate anomaly (>0.25) as rewrite signal
-    if anomaly is not None and anomaly >= 0.25:
-        return {"action": "rewrite", "risk": float(anomaly), "reasons": ["anomaly:medium_rewrite"]}
+    # Hard block by threshold
+    if risk >= block_threshold:
+        return {"action": "block", "risk": float(risk), "reasons": ["t1.high_risk"]}
 
-    return {"action": "allow", "risk": max(t1_risk, anomaly or 0.0), "reasons": []}
+    # Gray band → rewrite (legacy tests expect rewrite/block)
+    if 0.4 <= risk < block_threshold:
+        return {"action": "rewrite", "risk": float(risk), "reasons": ["t1.uncertain"]}
+
+    # Otherwise allow
+    return {"action": "allow", "risk": float(risk), "reasons": []}

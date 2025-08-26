@@ -7,6 +7,25 @@ from typing import Dict, Optional
 
 # ---------- Normalization ----------
 _ZW = {"\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF"}
+SUSPECT_LEXICAL = [
+    "evil twin",
+    "roleplay as",
+    "disclose internal",
+    "hidden system prompt",
+    "override instructions",
+    "ignore policy",
+    "developer mode",
+    "do anything now",
+]
+
+def _lexical_boost(text: str) -> dict:
+    t = text.lower()
+    boosts = {"injection": 0.0, "jailbreak": 0.0, "llm_jack": 0.0, "shadow_ai": 0.0}
+    hit = any(k in t for k in SUSPECT_LEXICAL)
+    if hit:
+        boosts["jailbreak"] = 0.6
+        boosts["llm_jack"] = 0.6
+    return boosts
 
 def normalize(text: str) -> str:
     # NFKC fold, strip zero-width, collapse whitespace, lowercase
@@ -95,6 +114,9 @@ class PromptClassifier:
 
     def classify(self, prompt: str) -> T1Result:
         scores = self.score_ml(prompt) or self.score_heuristics(prompt)
+        lex = _lexical_boost(prompt)
+        for k in scores:
+            scores[k] = max(scores[k], lex.get(k, 0.0))
         max_score = max(scores.values()) if scores else 0.0
         # thresholds tuned for low FP; “suspect” band triggers heavy judge
         if max_score >= 0.72:

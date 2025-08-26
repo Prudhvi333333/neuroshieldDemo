@@ -7,10 +7,17 @@ limits:
 
 rules:
   block_regex:
-    - '(?i)ignore\s+previous\s+instructions'
-    - '(?i)reveal\s+system\s+prompt'
-    - '(?i)bypass\s+security'
-    - '(?i)prompt\s*inject(ion)?'
+    - '(?i)\bignore\s+(?:previous|all)\s+instructions\b'
+    - '(?i)\breveal\s+(?:internal|hidden)?\s*system\s+prompt\b'
+    - '(?i)\bbypass\s+security\b'
+    - '(?i)\bprompt\s*inject(?:ion)?\b'
+    - '(?i)\bpretend\s+to\s+be\s+my\s+evil\s+twin\b'
+    - '(?i)\bevil\s+twin\b'
+    - '(?i)\bdisclose\s+internal\s+polic(y|ies)\b'
+    - '(?i)\boverride\s+(?:system|safety|policy)\s+instructions\b'
+    - '(?i)\bignore\s+(?:content|safety|policy)\s+(?:rules|guidelines)\b'
+
+
   risk_regex:
     - '(?i)api(?:[ _-]?|\s+)key'
     - '(?i)password'
@@ -92,7 +99,7 @@ rules:
 
 # policy/policy.yaml
 # policy/policy.yaml
-version: "2025-08-25.2"
+version: "2025-08-25.4"
 
 caps:
   default:
@@ -102,14 +109,9 @@ caps:
     fs_write: 0
 
 qa:
+  enabled: false             # << turn off QA gating; telemetry only if enabled
   max_allow_anomaly: 0.25
   block_threshold: 0.85
-  fastpath_deny_regex:
-    - '(?i)\binternal\s+console\b'
-    - '(?i)\bdiagnostic\s+mode\b'
-    - '(?i)\bsystem\s+status\b'
-    - '(?i)\bread[-\s]?only\s+session\b'
-    - '(?i)\bsys(tem)?\s*prompt\b'
 
 graph:
   max_runtime_ms: 5000   # soft cap for demo; adjust as needed

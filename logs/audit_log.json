@@ -662,5 +662,15 @@
     "attack_flags": "{}",
     "verdict": "Unverifiable",
     "context_digest": null
+  },
+  {
+    "timestamp": "2025-08-26T06:56:14.946768",
+    "user_id": null,
+    "prompt": "Hello",
+    "classification": "Risky",
+    "risk_score": 0.8,
+    "attack_flags": "{}",
+    "verdict": "Factually correct",
+    "context_digest": null
   }
 ]

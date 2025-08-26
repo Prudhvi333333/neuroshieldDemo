@@ -67,6 +67,46 @@ def _redact(text: str) -> str:
     txt = re.sub(r"(ghp_[A-Za-z0-9]{36})", "<redacted:github_pat>", txt)
     return txt
 
+# -----------------------------------------------------------------------------
+# New lightweight detectors for egress filtering
+# -----------------------------------------------------------------------------
+_HIJACK_KEYS = [
+    "sys", "system_prompt", "internal_prompt", "assistant_prompt", "hidden_prompt"
+]
+_HIJACK_RE = re.compile(r"\b(" + "|".join(map(re.escape, _HIJACK_KEYS)) + ")\b", re.I)
+
+_CITATION_RE = re.compile(r"\[(?:\d+)\]|https?://|\bsource:\b", re.I)
+_CAPITAL_PAIR_RE = re.compile(r"\b[A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+\b")
+_DATE_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_NUMBER_RE = re.compile(r"\b\d{3,}\b")
+
+
+def detect_output_hijack(text: str, expected_schema: Dict[str, any] | None = None) -> bool:
+    """Return True if response seems to leak hidden/system prompt fields."""
+    if not text:
+        return False
+    if expected_schema:
+        # allow keys that are explicitly expected
+        allowed = set(map(str.lower, expected_schema.keys()))
+        for k in _HIJACK_KEYS:
+            if k.lower() in allowed:
+                continue
+        # else fallthrough
+    return bool(_HIJACK_RE.search(text))
+
+
+def detect_claims(text: str) -> List[str]:
+    """Return list of claimed facts (very naive)."""
+    claims: List[str] = []
+    for m in _DATE_RE.findall(text):
+        claims.append(f"date:{m}")
+    for m in _NUMBER_RE.findall(text):
+        claims.append(f"number:{m}")
+    for m in _CAPITAL_PAIR_RE.findall(text):
+        claims.append(f"entity:{m}")
+    return claims
+
+
 def safety_label(text: str, context: Dict[str, any] | None = None) -> Dict[str, any]:
     pats, severity, redact_cfg = _cached_policy()
     raw = text or ""

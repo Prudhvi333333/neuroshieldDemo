@@ -108,6 +108,17 @@ def get_ids() -> TrajectoryIDS:
 
 def learn_from_sequence(sequence: List[str]) -> None:
     """Optional online learning for benign sequences."""
+    # Local learn for fallback
     ids = get_ids()
     ids.fit([sequence])
     ids.save(_MODEL_PATH)
+
+    # Push to Redis for central aggregation if available
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url and sequence:
+        try:
+            import redis, json  # runtime import to avoid hard dependency in tests
+            r = redis.Redis.from_url(redis_url, decode_responses=True)
+            r.rpush("ids:sequences", json.dumps(sequence))
+        except Exception:
+            pass  # fail silently – fallback to local learning only
