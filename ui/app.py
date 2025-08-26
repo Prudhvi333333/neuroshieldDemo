@@ -55,8 +55,8 @@ st.markdown("""
 .metric .sub {opacity: .8}
 
 /* horizontal flow - fixed */
-.flow-row { display:flex; align-items:stretch; gap:10px; flex-wrap:nowrap;
-            overflow-x:auto; white-space:nowrap; padding-bottom:4px; }
+.flow-row { display:flex; align-items:stretch; gap:10px; flex-wrap:wrap;
+            overflow-x:auto; white-space:no; padding-bottom:4px; }
 .flow-pill { position:relative; padding:10px 14px; border-radius:12px;
              border:1px solid var(--border); background:#12151C; color:var(--text);
              font-weight:600; min-width:180px; text-align:center; }
@@ -77,7 +77,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------- Helpers ----------
-UI_STEPS = ["Sanitizer", "T0 Rules", "T1 Classifier", "Heavy Judge", "LangGraph/Verify", "Final Verdict"]
+UI_STEPS = ["Sanitizer", "T0 Rules", "T1 Classifier", "Heavy Judge", "LangGraph", "Final Verdict"]
 
 def trace_to_ui(trace:list[str]) -> list[str]:
     """Map backend trace to our UI step names."""
@@ -87,7 +87,7 @@ def trace_to_ui(trace:list[str]) -> list[str]:
     if "t0" in t: steps.append("T0 Rules")
     if "t1" in t: steps.append("T1 Classifier")
     if "heavy_judge" in t: steps.append("Heavy Judge")
-    if "graph.llm" in t or "graph.verify" in t or "guardian" in t: steps.append("LangGraph/Verify")
+    if "graph.llm" in t or "graph.verify" in t or "guardian" in t: steps.append("LangGraph")
     steps.append("Final Verdict")
     return steps
 
@@ -119,8 +119,16 @@ def metric_card(title:str, score:str, subtitle:str):
     """, unsafe_allow_html=True)
 
 # ---------- Title ----------
-st.markdown('<div class="h-title">NeuroShield – Business Dashboard</div>', unsafe_allow_html=True)
-st.caption("Multi-tier LLM firewall. This-run metrics and transparent decision paths.")
+st.markdown("""
+    <div style="margin: 5px 0 15px 0;">
+        <h1 style="margin: 10px 0 0 0; font-size: 2.5rem; font-weight: 700; color: #f0f0f0;">
+            NeuroShield
+        </h1>
+        <p style="margin: 4px 0 0 0; font-size: 1.1rem; color: #a0a0a0;">
+            Multi-tier LLM firewall with transparent decision paths
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
 # ---------- Layout ----------
 left, right = st.columns([0.60, 0.40], gap="large")
