@@ -1,16 +1,22 @@
 from __future__ import annotations
 from typing import TypedDict, Optional, Dict, Any, Iterable, Tuple
+from pathlib import Path
+import sys
 
 from agents.initial_analysis_agent import InitialAnalysisAgent
 from agents.safe_prompt_agent import SafePromptAgent
 from agents.response_verifier_agent import ResponseVerifierAgent
 from agents.code_validation_agent import CodeValidationAgent
-from agents.web_search_agent import WebSearchAgent
 from agents.audit_chain_agent import AuditChainAgent
+from app.retrieval.retrieval_verifier import create_retrieval_verifier
+from app.guards.stage0_guard import run_stage0_guard
+from policy.loader import load_policy
 from llm_utils import call_llm
 
-RISK_BLOCK_THRESHOLD = 0.85
-RISK_FAST_PATH_THRESHOLD = 0.30
+# Import metrics collector and IDS
+sys.path.append(str(Path(__file__).parent.parent))
+from app.metrics.collector import time_block, record_path_taken
+from app.ids.runtime import score_transition
 
 class FirewallState(TypedDict, total=False):
     user_prompt: str
@@ -22,108 +28,167 @@ class FirewallState(TypedDict, total=False):
     llm_response: Optional[str]
     verdict: Optional[str]
     reason: Optional[str]
+    confidence: Optional[float]
     code_verdict: Optional[str]
     code_fragment: Optional[str]
     attack_detection: Optional[Dict[str, Any]]
     blockchain_log: Optional[bool]
-    web_verdict: Optional[str]
-    web_support: Optional[str]
+    evidence_score: Optional[float]
+    retrieval_claims: Optional[list]
+    ids: Optional[Dict[str, Any]]  # IDS anomaly detection results
+    # Stage-0 Guard fields
+    stage0_decision: Optional[str]
+    stage0_risk: Optional[float]
+    stage0_reasons: Optional[list]
+    path_taken: Optional[str]
+    pre_llm_semantics_invoked: Optional[bool]
 
 # Instantiate agents once (perf)
 initial_analyzer = InitialAnalysisAgent()       # ContextAnalyzer
 prompt_rewriter  = SafePromptAgent()            # used if Risky
 response_verifier = ResponseVerifierAgent()
 code_validator    = CodeValidationAgent()
-web_searcher      = WebSearchAgent()
+retrieval_verifier = create_retrieval_verifier()
 audit_logger      = AuditChainAgent()
 
 # ----------- graph (generator) -----------
-def build_firewall_graph() -> callable:
-    """
-    Returns a callable that accepts a state and yields (node_name, state)
-    after each step so the UI can stream tabs progressively.
-    """
+def build_firewall_graph():
+    """Build the firewall LangGraph with all agents and flow control."""
+    
     def run(state: FirewallState) -> Iterable[Tuple[str, FirewallState]]:
-        s: FirewallState = dict(state)
+        s = dict(state)
+        s["final_prompt"] = s.get("user_prompt", "")
+        
+        # Initialize audit logger and IDS tracking
+        audit_logger = AuditChainAgent()
+        last_node = "start"
+        
+        # ── Stage-0 Guard: Fast deterministic checks
+        stage0_result = run_stage0_guard(
+            prompt=s["final_prompt"], 
+            tools=None,  # No tools in prompt analysis
+            tenant_id="default"
+        )
+        
+        # Update state with Stage-0 results
+        s.update(stage0_result)
+        
+        # IDS: Score transition to Stage0Guard
+        current_node = "Stage0Guard"
+        ids_result = score_transition(last_node, current_node)
+        s["ids"] = {
+            "anomalous": ids_result.anomalous,
+            "transition": ids_result.transition,
+            "prob": ids_result.prob
+        }
+        last_node = current_node
+        
+        yield ("Stage0Guard", dict(s))
 
-        # ── Node 1: ContextAnalyzer (InitialAnalysisAgent)
-        analysis = initial_analyzer.run(s["user_prompt"])
-        s["classification"] = analysis.get("classification")
-        s["risk_score"] = float(analysis.get("risk_score", 0.0))
-        s["risk_reason"] = analysis.get("reason", "")
-        s["attack_detection"] = analysis.get("attack_detection", {})
-        yield ("ContextAnalyzer", dict(s))
-
-        # Fast block: high risk or explicit Blocked
-        if s["classification"] == "Blocked" or (s["risk_score"] or 0) >= RISK_BLOCK_THRESHOLD:
-            s["final_prompt"] = "[BLOCKED]"
+        # ── Conditional Branch: BLOCK → END
+        if stage0_result["decision"] == "BLOCK":
+            s["classification"] = "Blocked"
             s["llm_response"] = "⛔ Blocked."
             s["verdict"] = "Rejected"
+            s["reason"] = f"Stage-0 blocked: {', '.join(stage0_result['reasons'])}"
             s["blockchain_log"] = True
+            s["path_taken"] = "block"
+            
+            # IDS: Score transition to FinalVerdict
+            current_node = "FinalVerdict"
+            ids_result = score_transition(last_node, current_node)
+            s["ids"] = {
+                "anomalous": ids_result.anomalous,
+                "transition": ids_result.transition,
+                "prob": ids_result.prob
+            }
+            last_node = current_node
+            
             yield ("FinalVerdict", dict(s))
             audit_logger.log_event(dict(s))
             return
 
-        # ── Node 2: RegexFilter (we reuse your AttackDetection patterns inside initial analyzer result)
-        # For demo naming consistency, we emit a step that reflects regex/pattern filter outcome
-        # (the analysis already includes attack flags; we just surface them)
-        yield ("RegexFilter", dict(s))
-
-        # ── If Risky → rewrite prompt; else passthrough
-        if s["classification"] == "Risky":
-            s["final_prompt"] = prompt_rewriter.run(s["user_prompt"])
-        else:
-            s["final_prompt"] = s["user_prompt"]
-
-        # ── FAST PATH: if user pasted an LLM response, do not call LLM. Verify only.
+        # ── FAST PATH: if user pasted an LLM response, skip to verification
         if s.get("pasted_llm_response"):
             s["llm_response"] = s["pasted_llm_response"]
-            yield ("RiskScorer", dict(s))  # use same slot to show the rewritten/passthrough prompt + score
-
-            # Parallel-style (sequential here) verifications
+            s["path_taken"] = "fast_path"
+            yield ("RiskScorer", dict(s))
+            
+            # Skip to Stage-2 verification (Response DLP → Code → Retrieval)
             v_res = response_verifier.run(s["final_prompt"] or "", s["llm_response"] or "")
             s["verdict"] = v_res.get("verdict")
-            s["reason"]  = v_res.get("reason")
+            s["reason"] = v_res.get("reason")
             s["confidence"] = v_res.get("confidence", 0.5)
+            yield ("ResponseVerifier", dict(s))
+
+            r_res = retrieval_verifier.verify_response(s["llm_response"] or "")
+            s["evidence_score"] = r_res.get("evidence_score", 0.0)
+            s["retrieval_claims"] = r_res.get("claims", [])
+            yield ("RetrievalVerifier", dict(s))
 
             c_res = code_validator.run(s["final_prompt"] or "", s["llm_response"] or "")
-            s["code_verdict"]  = c_res.get("code_verdict")
+            s["code_verdict"] = c_res.get("code_verdict")
             s["code_fragment"] = c_res.get("code_fragment")
 
-            w_res = web_searcher.run(s["final_prompt"] or "", s["llm_response"] or "")
-            s["web_verdict"] = w_res.get("verdict")
-            s["web_support"] = w_res.get("support")
             yield ("FinalVerdict", dict(s))
             audit_logger.log_event(dict(s))
             return
 
-        # ── Node 3: RiskScorer (we already have score; this step exists for UI flow & fast verify path)
+        # ── Conditional Branch: REWRITE + high risk → SafePromptAgent → ModelCall
+        if (stage0_result["decision"] == "REWRITE" and 
+            stage0_result["risk"] >= risk_for_model_classify):
+            
+            s["pre_llm_semantics_invoked"] = True
+            s["path_taken"] = "rewrite_path"
+            
+            # Run SafePromptAgent for high-risk rewrites
+            s["final_prompt"] = prompt_rewriter.run(s["final_prompt"])
+            s["classification"] = "Risky"
+            yield ("SafePromptAgent", dict(s))
+            
+        # ── Low risk → direct to ModelCall (skip pre-LLM agents)
+        else:
+            s["path_taken"] = "direct_path"
+            s["classification"] = "Safe"
+
+        # ── Node: RiskScorer (for UI consistency)
         yield ("RiskScorer", dict(s))
 
-        # Very low risk? Skip heavy checks for demo-speed.
-        if (s["risk_score"] or 0) < RISK_FAST_PATH_THRESHOLD:
-            s["verdict"] = "Likely factual (fast-path)"
-            s["reason"]  = "Low-risk prompt; no external LLM call."
-            yield ("FinalVerdict", dict(s))
-            audit_logger.log_event(dict(s))
-            return
-
-        # ── Call LLM then verify
+        # ── Call LLM
         s["llm_response"] = call_llm(s["final_prompt"] or s["user_prompt"])
+        
+        # Initialize Stage-2 AFC tracking
+        s["afc_used"] = []
+        s["afc_denied"] = False
 
-        v_res = response_verifier.run(s["final_prompt"] or "", s["llm_response"] or "")
-        s["verdict"]   = v_res.get("verdict")
-        s["reason"]    = v_res.get("reason")
-        s["confidence"]= v_res.get("confidence", 0.5)
+        # ── Stage-2: Response verification pipeline with timing
+        with time_block("stage2.total"):
+            v_res = response_verifier.run(s["final_prompt"] or "", s["llm_response"] or "")
+            s["verdict"] = v_res.get("verdict")
+            s["reason"] = v_res.get("reason")
+            s["confidence"] = v_res.get("confidence", 0.5)
+            yield ("ResponseVerifier", dict(s))
 
-        c_res = code_validator.run(s["final_prompt"] or "", s["llm_response"] or "")
-        s["code_verdict"]  = c_res.get("code_verdict")
-        s["code_fragment"] = c_res.get("code_fragment")
+            # Evidence-first verification using local knowledge base
+            r_res = retrieval_verifier.verify_response(s["llm_response"] or "")
+            s["evidence_score"] = r_res.get("evidence_score", 0.0)
+            s["retrieval_claims"] = r_res.get("claims", [])
+            yield ("RetrievalVerifier", dict(s))
 
-        w_res = web_searcher.run(s["final_prompt"] or "", s["llm_response"] or "")
-        s["web_verdict"] = w_res.get("verdict")
-        s["web_support"] = w_res.get("support")
+            # Code validation (AST→LLM only if syntax_ok)
+            c_res = code_validator.run(s["final_prompt"] or "", s["llm_response"] or "")
+            s["code_verdict"] = c_res.get("code_verdict")
+            s["code_fragment"] = c_res.get("code_fragment")
 
+        # Final IDS scoring before audit
+        current_node = "FinalVerdict"
+        ids_result = score_transition(last_node, current_node)
+        s["ids"] = {
+            "anomalous": ids_result.anomalous,
+            "transition": ids_result.transition,
+            "prob": ids_result.prob
+        }
+        
         yield ("FinalVerdict", dict(s))
         audit_logger.log_event(dict(s))
 

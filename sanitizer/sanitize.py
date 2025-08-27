@@ -16,6 +16,12 @@ ZERO_WIDTH_CHARS = {
     "\u200D",  # ZERO WIDTH JOINER
     "\u2060",  # WORD JOINER
     "\uFEFF",  # ZERO WIDTH NO-BREAK SPACE
+    "\u202E",  # RIGHT-TO-LEFT OVERRIDE (RTLO)
+    "\u202D",  # LEFT-TO-RIGHT OVERRIDE
+    "\u2066",  # LEFT-TO-RIGHT ISOLATE
+    "\u2067",  # RIGHT-TO-LEFT ISOLATE
+    "\u2068",  # FIRST STRONG ISOLATE
+    "\u2069",  # POP DIRECTIONAL ISOLATE
 }
 
 # Base64 regex – looks for long bursts of base64 characters (including padding)

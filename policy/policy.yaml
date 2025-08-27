@@ -5,6 +5,15 @@ limits:
   max_urls: 5
   fastpath_max_len: 300
 
+thresholds:
+  fastpath: 0.1              # risk threshold for fast-path approval
+  t0_block: 0.8              # risk threshold for T0 blocking
+  stage0_rewrite: 0.5        # risk threshold for Stage0 rewrite decision
+  risk_for_model_classify: 0.5  # risk threshold to trigger model classification
+
+flags:
+  fastpath_enabled: true
+
 rules:
   block_regex:
     - '(?i)\bignore\s+(?:previous|all)\s+instructions\b'
@@ -120,6 +129,74 @@ graph:
 timelock:
   default_ttl_seconds: 20
   tools: ["email.send"]   # any call to these tools must go through timelock
+
+afc:
+  WebFetcher:
+    schema:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+      required: [url]
+      additionalProperties: false
+    domain_allowlist:
+      - "*.example.com"
+      - "api.mycorp.internal"
+      - "docs.python.org"
+    cooldown_seconds: 30
+  DataExport:
+    schema:
+      type: object
+      properties:
+        project: { type: string, minLength: 1 }
+        format: { type: string, enum: ["csv","jsonl"] }
+      required: [project, format]
+      additionalProperties: false
+    domain_allowlist: []
+    cooldown_seconds: 120
+  web.get:
+    schema:
+      type: object
+      required: ["url"]
+      properties:
+        url:
+          type: string
+          format: uri
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+      additionalProperties: false
+    domain_allowlist:
+      - "example.com"
+      - "docs.python.org"
+      - "*.safe-domain.com"
+    cooldown_seconds: 2
+  email.send:
+    schema:
+      type: object
+      required: ["to", "subject", "body"]
+      properties:
+        to:
+          type: string
+          format: email
+        subject:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+      additionalProperties: false
+    domain_allowlist: []
+    cooldown_seconds: 300
+  shell.exec:
+    schema:
+      type: object
+      properties:
+        cmd:
+          type: string
+      additionalProperties: false
+    domain_allowlist: []
+    cooldown_seconds: 0
 
 tools:
   - name: web.get
