@@ -2,7 +2,7 @@
 import os, time, base64, json, requests
 import streamlit as st
 
-BACKEND = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+BACKEND = os.getenv("BACKEND_URL", "http://127.0.0.1:8001")
 BASIC_USER = os.getenv("BASIC_USER", "admin")
 BASIC_PASS = os.getenv("BASIC_PASS", "password")
 
@@ -12,7 +12,7 @@ def _auth_header():
 
 def api_get(path):
     try:
-        r = requests.get(f"{BACKEND}{path}", headers=_auth_header(), timeout=15)
+        r = requests.get(f"{BACKEND}{path}", timeout=15)
         return r.status_code == 200, (r.json() if r.content else {})
     except Exception as e:
         return False, {"error": str(e)}
@@ -44,7 +44,7 @@ def get_policy_info():
 
 def api_post(path, payload):
     try:
-        r = requests.post(f"{BACKEND}{path}", headers={"Content-Type":"application/json", **_auth_header()}, json=payload, timeout=60)
+        r = requests.post(f"{BACKEND}{path}", headers={"Content-Type":"application/json"}, json=payload, timeout=60)
         ok = r.status_code == 200
         return ok, (r.json() if ok and r.content else {"http_status": r.status_code, "text": r.text})
     except Exception as e:

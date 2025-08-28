@@ -1,0 +1,1 @@
+{"timestamp": 1756276375.7247112, "request_id": "b0801efd-48bd-4a04-ba70-5b1e66e37a62", "decision": "ALLOW", "risk_score": 0.0, "latency_ms": 35, "trace": ["ingress", "stage0_guard", "graph_error:'function' object has no attribute 'invoke'"], "tenant_id": "default"}

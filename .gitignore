@@ -32,3 +32,5 @@ ENV/
 .idea/
 *.swp
 *.swo
+
+.tests
