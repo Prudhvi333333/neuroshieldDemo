@@ -1,17 +1,13 @@
 from __future__ import annotations
-import json, math, re, time
-from pathlib import Path
+import time
 from typing import Any, Dict
-from collections import defaultdict
 import datetime
+import asyncio
 
 import streamlit as st
 
-# Standard library & third-party
-import os
-
 # Assuming these imports are correctly set up and accessible
-from langgraph_core.firewall_graph import build_firewall_graph, State
+from orchestrator_enhanced import orchestrate_security_analysis
 
 import logging
 logging.basicConfig(
@@ -354,49 +350,47 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
     for placeholder in section_placeholders.values():
         placeholder.empty()
     
-    # Start analysis
-    graph = build_firewall_graph()
-    initial_graph_state: State = {"user_prompt": prompt}
-    if paste_toggle and pasted_llm_response:
-        initial_graph_state["llm_response"] = pasted_llm_response
-
+    # Start analysis with enhanced orchestration
     start_time = time.perf_counter()
     
     try:
-        current_accumulated_state: State = initial_graph_state.copy()
-        
         # Create progress bar for better UX
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        status_text.text("🔍 Initializing security analysis...")
+        status_text.text("🔍 Initializing enhanced security analysis...")
         progress_bar.progress(10)
         
-        with st.spinner("🔍 Analyzing security..."):
-            step_count = 0
-            total_steps = 7  # Approximate number of analysis steps
+        # Use enhanced orchestration system
+        context = {}
+        if paste_toggle and pasted_llm_response:
+            context["llm_response"] = pasted_llm_response
+        
+        with st.spinner("🔍 Analyzing security with enhanced agents..."):
+            # Use enhanced orchestration with adaptive strategy
+            orchestration_result = asyncio.run(orchestrate_security_analysis(
+                prompt=prompt,
+                context=context,
+                strategy="adaptive"
+            ))
             
-            for event in graph.stream(initial_graph_state):
-                if not isinstance(event, dict) or not event:
-                    continue
-                    
-                step_count += 1
-                progress = min(10 + (step_count / total_steps) * 80, 90)
-                progress_bar.progress(int(progress))
-                
-                if "__node__" in event and len(event) == 1:
-                    node_name = event["__node__"]
-                    status_text.text(f"🔍 Processing: {node_name}")
-                else:
-                    node_name = list(event.keys())[0]
-                    payload = event[node_name]
-                    if payload:
-                        current_accumulated_state.update(payload)
-                    status_text.text(f"🔍 Analyzing: {node_name}")
+            progress_bar.progress(90)
+            status_text.text("🔍 Finalizing analysis...")
+            
+            # Convert orchestration result to expected format
+            final_decision_obj = orchestration_result.get("final_decision", {})
+            current_accumulated_state = {
+                "classification": final_decision_obj.get("final_action", "unknown"),
+                "risk_score": final_decision_obj.get("final_risk_score", 0.0),
+                "attack_detection": orchestration_result.get("agent_results", {}).get("attack_detection", {}),
+                "reason": f"Enhanced multi-agent analysis completed using {orchestration_result.get('strategy_used', 'adaptive')} strategy",
+                "final_prompt": prompt,
+                "llm_response": context.get("llm_response", "")
+            }
         
         # Complete progress
         progress_bar.progress(100)
-        status_text.text("✅ Analysis completed!")
+        status_text.text("✅ Enhanced analysis completed!")
         
         # Store results for display
         analysis_time = time.perf_counter() - start_time

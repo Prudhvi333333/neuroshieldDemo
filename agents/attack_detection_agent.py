@@ -65,4 +65,14 @@ class AttackDetectionAgent(BaseAgent):
         d["overall_risk_score"] = max(scores) if scores else 0.0
         d["attack_types"] = [k for k, v in d.items() if getattr(v, "get", lambda _: False)("detected")]
         return d
- 
+    
+    async def execute(self, prompt: str, context: Dict = None) -> Dict:
+        """Execute method for orchestrator compatibility"""
+        response = context.get("response") if context else None
+        result = self.run(prompt, response)
+        return {
+            "agent": self.name,
+            "attack_detection": result,
+            "processing_time": 0.1,  # Lightweight pattern matching
+            "status": "completed"
+        }

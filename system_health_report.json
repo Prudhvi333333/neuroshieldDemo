@@ -1,0 +1,45 @@
+{
+  "timestamp": "2025-08-30T16:52:58.109427",
+  "overall_status": "CRITICAL",
+  "component_tests": {
+    "core_imports": {
+      "status": "FAIL",
+      "duration": 1.0237435000017285,
+      "error": "Import error: No module named 'torch'"
+    },
+    "ml_engines": {
+      "status": "FAIL",
+      "duration": 0.0007394999265670776,
+      "error": "ML Engine error: No module named 'torch'"
+    },
+    "agent_system": {
+      "status": "PASS",
+      "duration": 0.003511999733746052,
+      "details": "Agent system functional"
+    },
+    "orchestration": {
+      "status": "PASS",
+      "duration": 4.463625699747354,
+      "details": "Orchestration successful - adaptive strategy"
+    },
+    "api_components": {
+      "status": "PASS",
+      "duration": 1.362523399759084,
+      "details": "API components available"
+    },
+    "integrations": {
+      "status": "FAIL",
+      "duration": 0.5483356001786888,
+      "error": "Integration error: 'charmap' codec can't decode byte 0x8f in position 8010: character maps to <undefined>"
+    }
+  },
+  "performance_metrics": {
+    "total_test_time": 7.402479699347168
+  },
+  "errors": [
+    "Import error: No module named 'torch'",
+    "ML Engine error: No module named 'torch'",
+    "Integration error: 'charmap' codec can't decode byte 0x8f in position 8010: character maps to <undefined>"
+  ],
+  "warnings": []
+}

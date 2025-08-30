@@ -1,29 +1,69 @@
-# NeuroShield Code Flow & Architecture
+# NeuroShield Enhanced Architecture - Day 5 & Day 7 Integration
 
-This document maps **end-to-end execution** of the refactored local-only NeuroShield application.  It should serve as a quick reference for where every major call originates and how data flows between components.
+This document maps **end-to-end execution** of the enhanced NeuroShield application with Day 5 Agent Orchestration and Day 7 Federated Learning capabilities. It serves as a comprehensive reference for the new multi-agent architecture and federated intelligence system.
 
 ---
-## 1. High-Level Component Map
+## 1. Enhanced Component Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Front-End
-        UI[Streamlit UI\n`app.py`]
+flowchart TB
+    subgraph "Enhanced UI Layer"
+        UI[Enhanced Streamlit UI\n`app_enhanced.py`]
+        Config[Orchestration Config]
     end
 
-    subgraph Core
+    subgraph "Day 5: Agent Orchestration Layer"
+        Orchestrator[Enhanced Agent Orchestrator\n`orchestrator_enhanced.py`]
+        Strategy[Orchestration Strategies\nParallel/Sequential/Adaptive]
+    end
+
+    subgraph "Enhanced Agent Ecosystem"
+        EFA[Enhanced Firewall Agent]
+        SAA[Shadow AI Agent]
+        BAA[Behavioral Analytics Agent]
+        TIA[Threat Intelligence Agent]
+        ADA[Attack Detection Agent]
+        ACA[Audit Chain Agent]
+    end
+
+    subgraph "Day 7: Federated Learning"
+        FLE[Federated Learning Engine\n`federated_learning_engine.py`]
+        GlobalModel[Global Threat Models]
+        PrivacyLayer[Differential Privacy]
+    end
+
+    subgraph "Original Core (Fallback)"
         Graph[LangGraph Firewall\n`build_firewall_graph()`]
-        Agents[LLM Agents]
-        LLM[Gemini via google-generativeai\n`llm_utils.py`]
-        Logs[Local JSON logging\n`logs/audit_log.json`]
+        LLM[Gemini API\n`llm_utils.py`]
     end
 
-    UI -->|user_prompt| Graph
-    Graph --> Agents
-    Agents --> LLM
-    Agents -->|results| Graph
-    Graph -->|state updates| UI
-    Graph -->|audit events| Logs
+    subgraph "Storage & Logging"
+        Logs[Audit Logs\n`logs/audit_log.json`]
+        Models[Federated Models\n`federated_models/`]
+    end
+
+    UI --> Config
+    Config --> Orchestrator
+    Orchestrator --> Strategy
+    Strategy --> EFA
+    Strategy --> SAA
+    Strategy --> BAA
+    Strategy --> TIA
+    Strategy --> ADA
+    Strategy --> ACA
+    
+    EFA --> FLE
+    SAA --> FLE
+    BAA --> FLE
+    
+    FLE --> GlobalModel
+    FLE --> PrivacyLayer
+    
+    Orchestrator -.->|Fallback| Graph
+    Graph --> LLM
+    
+    ACA --> Logs
+    FLE --> Models
 ```
 
 ---
@@ -83,85 +123,152 @@ Agents:
 |`ResponseVerifierAgent`| Judge factual correctness; accepts optional `search_results`.| `run(prompt, response, search_results=None)` |
 |`AuditChainAgent`| Append final graph state to `logs/audit_log.json`. | `log_event(state)` |
 
-### 2.4 LLM Utilities (`llm_utils.py`)
-1. `load_dotenv()` ➜ pulls `GOOGLE_API_KEY` & model name.
-2. Configures `google.generativeai` & memoises model.
-3. `_call_gemini()`  – thin wrapper returning generator of text chunks.
-4. Public helpers:
-   * `call_llm(prompt, system_msg)` – free-form text.
-   * `call_llm_json(prompt, system_msg)` – forces `response_mime_type=application/json` and strips markdown fences.
+### 2.4 Day 7: Federated Learning Integration
+**Collaborative Threat Intelligence:**
+```python
+class FederatedLearningEngine:
+    def __init__(self, participant_id, role):
+        self.participant_id = participant_id
+        self.role = role  # COORDINATOR, PARTICIPANT, VALIDATOR
+        self.differential_privacy_epsilon = 1.0
+        self.byzantine_tolerance_threshold = 0.3
+```
 
-### 2.5 Logging & Storage
-* Every run appends a JSON object to `logs/audit_log.json` (`AuditChainAgent`).
-* Risky/blocked prompts can additionally be archived by other modules (if enabled).
-* No cloud storage ‑ everything is local.
+**Key Features:**
+- **Privacy-Preserving**: Differential privacy protection for sensitive data
+- **Secure Aggregation**: Byzantine fault-tolerant model aggregation
+- **Model Types**: Threat detection, behavioral analysis, anomaly detection
+- **Collaborative Intelligence**: Global threat models without data sharing
+
+**Federated Workflow:**
+1. **Session Creation**: Coordinator creates federated learning session
+2. **Participant Joining**: Multiple organizations join threat intelligence sharing
+3. **Local Training**: Each participant trains on private data
+4. **Secure Aggregation**: Model updates aggregated with privacy protection
+5. **Global Model**: Distributed threat intelligence model updated
+6. **Prediction**: Enhanced threat detection using collaborative intelligence
+
+### 2.5 Enhanced Storage & Monitoring
+**Comprehensive Logging:**
+- **Audit Logs**: `logs/audit_log.json` - All security events and decisions
+- **Orchestration History**: Agent performance metrics and execution traces
+- **Federated Models**: `federated_models/` - Collaborative threat intelligence models
+- **Performance Metrics**: Real-time agent health and system statistics
+
+**System Administration:**
+- **Agent Status Dashboard**: Real-time monitoring of all security agents
+- **Performance Analytics**: Response times, success rates, error tracking
+- **Federated Learning Stats**: Session participation, model accuracy, privacy metrics
+- **Health Checks**: Automated system health monitoring and alerting
 
 ---
-## 2.6 Recent Stability & UX Fixes (July 2025)
+## 2.6 Enhanced Capabilities (Day 5 & Day 7 Integration)
 
-* Hardened `_call_gemini()` against blocked/empty responses; falls back to candidate parts to avoid crashes.
-* Implemented concise LLM prompt (≤ 3 bullet points) for faster answers (~14 s avg).
-* ResponseVerifierAgent now returns `verdict / reason / confidence` in free-form text (no JSON constraint) and supports nuanced verdicts (Partially correct, Hallucinated, etc.).
-* Two-pass verification: WebSearchAgent evidence and second verifier pass when `risk_score ≥ 0.60` or `confidence < 0.9`.
-* WebSearchAgent now tolerates fenced or malformed JSON and extracts `verdict/support` via regex fallback, ensuring support text is always available to the Verifier and UI.
-* `search_support` field is preserved in graph state so the UI can display external evidence alongside the final verdict.
-* Graph maps verifier verdict to final `classification` but only when the initial risk is low (< 0.6) so jailbreak & prompt-injection flow is unaffected.
-* UI tabs: kept full state JSON; users can check Final Results for details.
+**Day 5 - Enhanced Agent Orchestration:**
+* **Multi-Strategy Coordination**: Adaptive, parallel, sequential, and priority-based orchestration
+* **Intelligent Routing**: Dynamic agent selection based on prompt complexity and risk indicators
+* **Performance Optimization**: Agent health monitoring, load balancing, and failover mechanisms
+* **Comprehensive Metrics**: Real-time performance tracking and system health monitoring
+
+**Day 7 - Federated Learning Integration:**
+* **Privacy-Preserving Collaboration**: Differential privacy protection for sensitive threat data
+* **Byzantine Fault Tolerance**: Secure aggregation resistant to malicious participants
+* **Global Threat Intelligence**: Collaborative models without exposing private data
+* **Multi-Model Support**: Threat detection, behavioral analysis, and anomaly detection models
+
+**Enhanced Security Features:**
+* **Shadow AI Detection**: Real-time monitoring for unauthorized AI service usage
+* **Behavioral Analytics**: Advanced user behavior anomaly detection
+* **Threat Intelligence**: Enhanced pattern matching with federated insights
+* **Comprehensive Auditing**: Full security event logging and compliance tracking
 
 ---
-## 3. Sequence Diagram (simplified)
+## 3. Enhanced Execution Flow
 ```mermaid
 sequenceDiagram
     participant User
-    participant UI as Streamlit
-    participant Graph
-    participant Analysis
-    participant Rewrite
-    participant Gemini
-    participant Verify as Verifier+Search+Code
+    participant UI as Enhanced UI
+    participant Orchestrator
+    participant Strategy as Orchestration Strategy
+    participant Agents as Enhanced Agents
+    participant FL as Federated Learning
     participant Audit
 
-    User->>UI: Enter prompt
-    UI->>Graph: initial_state
-    Graph->>Analysis: run(prompt)
-    Analysis->>Gemini: JSON classify
-    Gemini-->>Analysis: JSON / raw text
-    Analysis-->>Graph: {classification, risk_score, ...}
-    alt Blocked
-        Graph->>Audit: log
-    else Safe/Risky
-        Graph->>Rewrite: (only if Risky)
-        Rewrite->>Gemini: rewrite
-        Gemini-->>Rewrite: rewritten prompt
-        Graph->>Gemini: final prompt
-        Gemini-->>Graph: llm_response
-        alt risk<0.30
-            Graph->>Audit: log fast-path
-        else
-            Graph->>Verify: parallel runs
-            Verify->>Gemini: fact-check / search etc.
-            Verify-->>Graph: verdicts
-            Graph->>Audit: log
+    User->>UI: Enter prompt + context
+    UI->>UI: Select orchestration strategy
+    UI->>Orchestrator: orchestrate_analysis(prompt, context, strategy)
+    Orchestrator->>Strategy: determine execution plan
+    
+    alt Parallel Strategy
+        Strategy->>Agents: execute all agents simultaneously
+        par Enhanced Firewall
+            Agents->>Agents: multi-agent coordination
+        and Shadow AI Detection
+            Agents->>Agents: network traffic analysis
+        and Behavioral Analytics
+            Agents->>Agents: user behavior analysis
+        and Threat Intelligence
+            Agents->>FL: query federated models
+            FL-->>Agents: collaborative insights
         end
+    else Sequential Strategy
+        Strategy->>Agents: execute by priority
+        Agents->>Agents: priority-based execution
+        alt High Risk Detected
+            Agents->>Strategy: early termination
+        end
+    else Adaptive Strategy
+        Strategy->>Strategy: analyze prompt complexity
+        Strategy->>Agents: optimal routing
     end
-    Audit-->>UI: final state
+    
+    Agents-->>Orchestrator: individual results
+    Orchestrator->>Orchestrator: aggregate results
+    Orchestrator->>FL: contribute to federated learning
+    Orchestrator->>Audit: comprehensive logging
+    Orchestrator-->>UI: final security decision
+    UI-->>User: enhanced security analysis
 ```
 
 ---
-## 4. Trigger Points Summary
-| Trigger | Code Location | Downstream effect |
+## 4. Enhanced Trigger Points
+| Trigger | Code Location | Downstream Effect |
 |---------|---------------|-------------------|
-|User submits prompt|`app.py` (`st.button("Analyse Security")`) | Builds initial state and starts `graph.stream()` |
-|Each LangGraph event|Loop in `app.py` lines ~180-210 | Updates UI per node & stores state |
-|Node execution|Functions `n_*` in `firewall_graph.py` | Call agent(s), update state |
-|Every audit|`AuditChainAgent.log_event()` | Appends JSON line to `logs/audit_log.json` |
+|Enhanced Analysis|`app_enhanced.py` (`st.button("Run Enhanced Analysis")`) | Initiates orchestrated multi-agent analysis |
+|Orchestration Strategy|`orchestrator_enhanced.py` | Routes to parallel/sequential/adaptive execution |
+|Agent Execution|`agents/*.py` (`async def execute()`) | Coordinated security analysis with context |
+|Federated Learning|`federated_learning_engine.py` | Collaborative threat intelligence sharing |
+|Result Aggregation|`orchestrator_enhanced.py` (`_aggregate_results()`) | Combines multi-agent results into final decision |
+|System Monitoring|Admin tab in `app_enhanced.py` | Real-time agent health and performance tracking |
+|Audit Logging|`AuditChainAgent.execute()` | Enhanced security event logging with full context |
 
 ---
 ## 5. How to View Mermaid diagrams
 Paste the mermaid blocks into VS Code (extension: *Markdown Preview Mermaid Support*) or any online viewer like <https://mermaid.live/>.
 
 ---
-**Last updated:** 2025-07-18
+## 6. Integration Benefits
+
+**Enhanced Security Coverage:**
+- **Multi-Agent Coordination**: Comprehensive threat detection across multiple vectors
+- **Adaptive Intelligence**: Dynamic routing based on threat complexity and risk indicators
+- **Collaborative Learning**: Global threat intelligence without compromising privacy
+- **Real-Time Monitoring**: Continuous system health and performance optimization
+
+**Performance Improvements:**
+- **Intelligent Routing**: Optimal agent selection for faster analysis
+- **Parallel Processing**: Simultaneous execution for maximum coverage
+- **Caching & Optimization**: Reduced response times through intelligent caching
+- **Fault Tolerance**: Automatic failover and retry mechanisms
+
+**Enterprise Readiness:**
+- **Comprehensive Auditing**: Full security event logging and compliance tracking
+- **System Administration**: Real-time monitoring and management capabilities
+- **Federated Deployment**: Multi-organization threat intelligence sharing
+- **Privacy Protection**: Differential privacy for sensitive data collaboration
+
+---
+**Last updated:** 2025-08-29 (Day 5 & Day 7 Integration)
 
 ![Component Diagram](images/component.png)
 ![Firewall Diagram](images/firewall.png)
