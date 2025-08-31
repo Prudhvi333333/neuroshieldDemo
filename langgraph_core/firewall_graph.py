@@ -2,6 +2,7 @@ from __future__ import annotations
  
 from concurrent.futures import ThreadPoolExecutor
 import re
+import time
 from typing import Any, Dict, TypedDict
  
 from langgraph.graph import END, StateGraph
@@ -45,18 +46,19 @@ audit = AuditChainAgent()
  
  
 def n_analysis(s: State) -> State:
-    s.update(analysis.run(s["user_prompt"]))
+    analysis_result = analysis.run(s["user_prompt"])
+    s.update(analysis_result)
+    
+    # Store analysis timing for performance metrics
+    s["analysis_time"] = analysis_result.get("analysis_time", 0.0)
+    
+    # Debug: Print analysis result
+    print(f"DEBUG n_analysis result: Classification={s.get('classification')}, Risk={s.get('risk_score')}, Bypass={s.get('bypass_used')}")
 
     # Heuristic bump: certain keywords indicate social-engineering or security tooling requests
     keywords = [
-        "admin access",
-        "jwt token",
-        "jwt",
-        "login page",
-        "phishing",
-        "reverse engineer",
-        "spoof",
-        "credential",
+        "admin access", "jwt token", "jwt", "login page", "phishing",
+        "reverse engineer", "spoof", "credential"
     ]
     txt_lc = s["user_prompt"].lower()
     escalated = False
@@ -75,13 +77,16 @@ def n_analysis(s: State) -> State:
         s.setdefault("reason", "Attack detection escalation")
 
     if escalated:
-        # ensure downstream sees updated values
         s["escalated"] = True
+    
+    print(f"DEBUG n_analysis final: Classification={s.get('classification')}, Risk={s.get('risk_score')}")
     return s
  
  
 def n_rewrite(s: State) -> State:
+    rewrite_start = time.perf_counter()
     s["final_prompt"] = rewriter.run(s["user_prompt"])
+    s["rewrite_time"] = time.perf_counter() - rewrite_start
     return s
  
  
@@ -97,9 +102,11 @@ def n_block(s: State) -> State:
  
 def n_llm(s: State) -> State:
     if not s.get("llm_response"):
+        llm_start = time.perf_counter()
         s["llm_response"] = call_llm(
             s["final_prompt"],
             "You are a knowledgeable assistant. Answer concisely in at most 3 short bullet points addressing only the user's question, with no extra commentary.")
+        s["llm_time"] = time.perf_counter() - llm_start
     return s
  
 def _has_code(text: str) -> bool:
@@ -111,66 +118,58 @@ def _has_code(text: str) -> bool:
 def n_verify(s: State) -> State:
     p, r = s["final_prompt"], s["llm_response"]
 
+    # Store original prompt classification to preserve it
+    original_classification = s.get("classification", "Unknown")
+    original_risk_score = s.get("risk_score", 0.0)
+    original_reason = s.get("reason", "")
+    
+    # Track verification timing
+    verify_start = time.perf_counter()
+
     # always run verifier
     v_result = verifier.run(p, r)
-    s.update(v_result)
-    print("DEBUG after first verifier pass:", {k: v for k, v in s.items() if k in ["verdict", "reason", "confidence"]})
-
-    # Map verifier verdict to higher-level classification labels
-    # Only adjust classification if the prompt was originally low-risk
-    if s.get("risk_score", 0.0) < 0.6:
-        verdict_lc = v_result.get("verdict", "").lower()
-        if "partially" in verdict_lc:
-            s["classification"] = "Partially correct"
-            s["risk_score"] = max(s.get("risk_score", 0.0), 0.3)
-        elif "incorrect" in verdict_lc or "hallucinated" in verdict_lc:
-            s["classification"] = "Hallucinated"
-            s["risk_score"] = max(s.get("risk_score", 0.0), 0.8)
-        elif "factually correct" in verdict_lc:
-            s["classification"] = "Correct"
-        else:
-            s["classification"] = "Unverifiable"
+    verify_time = time.perf_counter() - verify_start
+    
+    # Store response verification separately (don't overwrite prompt classification)
+    s["response_verdict"] = v_result.get("verdict", "Unknown")
+    s["response_confidence"] = v_result.get("confidence", 0.0)
+    s["verification_time"] = verify_time
+    
+    # Preserve original prompt classification
+    s["classification"] = original_classification
+    s["risk_score"] = original_risk_score
+    s["reason"] = original_reason
 
     # decide if code validation needed
     if _has_code(r):
         s.update(code_validator.run(p, r))
 
-    # decide if web search needed
-    need_search = s["risk_score"] >= SEARCH_T or v_result.get("confidence", 0.5) < CONF_T
+    # Only do web search for low-confidence cases, not high-confidence bypass results
+    need_search = (not s.get("bypass_used") and 
+                   (s["risk_score"] >= SEARCH_T or s.get("response_confidence", 0.5) < CONF_T))
+    
     if need_search:
+        search_start = time.perf_counter()
         search_res = searcher.run(p, r)
-        s.update(search_res)
-        # second pass verifier with evidence
-        second_pass = verifier.run(p, r, search_res)
-        # propagate final verifier findings (verdict, reason, confidence)
-        s.update(second_pass)
-        # Remove yield statements - they conflict with final return
-        # yield {"verify": second_pass}
-        # yield {"search": second_pass}  # duplicate under 'search' key for UI
-        print("DEBUG second_pass result:", second_pass)                                                                                                                                           
-        # keep evidence from search results
+        search_time = time.perf_counter() - search_start
+        
         if "support" in search_res:
             s["search_support"] = search_res["support"]
+        s["search_time"] = search_time
         
-        # CRITICAL FIX: Ensure second-pass verifier fields are in the final state
-        # The s.update(second_pass) above should work, but let's be explicit
-        for key in ["verdict", "reason", "confidence", "raw_verifier_output"]:
-            if key in second_pass:
-                s[key] = second_pass[key]
+        # second pass verifier with evidence
+        second_verify_start = time.perf_counter()
+        second_pass = verifier.run(p, r, search_res)
+        second_verify_time = time.perf_counter() - second_verify_start
         
-        print("DEBUG final state after second_pass update:", {k: v for k, v in s.items() if k in ["verdict", "reason", "confidence"]})
+        s["response_verdict"] = second_pass.get("verdict", s.get("response_verdict", "Unknown"))
+        s["response_confidence"] = second_pass.get("confidence", s.get("response_confidence", 0.0))
+        s["second_verification_time"] = second_verify_time
     
-    # FINAL FIX: ALWAYS ensure verifier fields are in the returned state
-    # The returned state becomes the payload for the final 'verify' event
-    # Force these fields to be present regardless of conditions
-    if 'verdict' not in s:
-        s["verdict"] = "Unknown"
-    if 'reason' not in s:
-        s["reason"] = "No reason provided"
-    if 'confidence' not in s:
-        s["confidence"] = 0.0
+    # Set final verdict for UI (response quality, not prompt risk)
+    s["verdict"] = s.get("response_verdict", "Unknown")
+    s["confidence"] = s.get("response_confidence", 0.0)
     
-    print("DEBUG: Final return state verifier fields:", {k: v for k, v in s.items() if k in ['verdict', 'reason', 'confidence']})
     return s
 
  
@@ -180,6 +179,15 @@ def n_fast(s: State) -> State:
     return s
  
 def n_audit(s: State) -> State:
+    # Ensure critical fields are preserved in final state
+    if not s.get("classification") or s.get("classification") == "Unknown":
+        s["classification"] = "Safe"  # Default fallback
+        s["risk_score"] = 0.3
+        s["reason"] = "Default classification applied"
+    
+    # Debug final audit state
+    print(f"DEBUG n_audit final state: Classification={s.get('classification')}, Risk={s.get('risk_score')}, Reason={s.get('reason')}")
+    
     audit.log_event(s)
     return s
  
@@ -191,31 +199,25 @@ def build_firewall_graph():
     g.add_node("block", n_block)
     g.add_node("llm", n_llm)
     g.add_node("verify", n_verify)
-    g.add_node("fast", n_fast)
     g.add_node("audit", n_audit)
- 
+
     g.set_entry_point("analysis")
- 
+
     g.add_conditional_edges(
         "analysis",
         lambda s: (
-            "Blocked" if s["risk_score"] >= BLOCK_T or s["classification"] == "Blocked" else
-            "Risky" if s["risk_score"] >= RISKY_T else
-            s["classification"]
+            "block" if s.get("risk_score", 0) >= BLOCK_T or s.get("classification") == "Blocked" else
+            "rewrite" if s.get("risk_score", 0) >= RISKY_T or s.get("classification") == "Risky" else
+            "passthrough"  # Safe prompts go through LLM for response
         ),
-        {"Safe": "passthrough", "Risky": "rewrite", "Blocked": "block"},
+        {"passthrough": "passthrough", "rewrite": "rewrite", "block": "block"},
     )
- 
+
     g.add_edge("rewrite", "llm")
     g.add_edge("passthrough", "llm")
- 
-    # Always run verification step (adaptive inside n_verify)
     g.add_edge("llm", "verify")
- 
     g.add_edge("block", "audit")
-    # fast node deprecated (kept for backward compatibility but not used)
-    # g.add_edge("fast", "audit")
     g.add_edge("verify", "audit")
     g.add_edge("audit", END)
- 
+
     return g.compile()

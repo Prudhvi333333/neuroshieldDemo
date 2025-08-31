@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict
 from collections import defaultdict
 import datetime
+import time  # Ensure time is imported
 
 import streamlit as st
 
@@ -354,9 +355,17 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
     for placeholder in section_placeholders.values():
         placeholder.empty()
     
-    # Start analysis
+    # Start analysis with optimized backend
     graph = build_firewall_graph()
-    initial_graph_state: State = {"user_prompt": prompt}
+    initial_graph_state: State = {
+        "user_prompt": prompt,
+        "classification": "",
+        "risk_score": 0.0,
+        "reason": "",
+        "attack_detection": {},
+        "final_prompt": "",
+        "llm_response": ""
+    }
     if paste_toggle and pasted_llm_response:
         initial_graph_state["llm_response"] = pasted_llm_response
 
@@ -379,27 +388,44 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
             for event in graph.stream(initial_graph_state):
                 if not isinstance(event, dict) or not event:
                     continue
+                
+                # Debug: Print each event to understand structure
+                print(f"DEBUG UI Event: {event}")
                     
                 step_count += 1
                 progress = min(10 + (step_count / total_steps) * 80, 90)
                 progress_bar.progress(int(progress))
                 
+                # Skip metadata-only events but update with actual data
                 if "__node__" in event and len(event) == 1:
                     node_name = event["__node__"]
                     status_text.text(f"🔍 Processing: {node_name}")
-                else:
-                    node_name = list(event.keys())[0]
-                    payload = event[node_name]
-                    if payload:
-                        current_accumulated_state.update(payload)
-                    status_text.text(f"🔍 Analyzing: {node_name}")
+                    continue
+                
+                # Extract nested data from graph events (CRITICAL FIX)
+                for key, value in event.items():
+                    if not key.startswith("__") and isinstance(value, dict):
+                        # This is node data - extract the actual state values
+                        current_accumulated_state.update(value)
+                        status_text.text(f"🔍 Analyzing: {key}")
+                        # Debug: Show what we're extracting
+                        print(f"DEBUG UI Extract from {key}: Classification: {value.get('classification')}, Risk: {value.get('risk_score')}")
+                        print(f"DEBUG UI State after update: Classification: {current_accumulated_state.get('classification')}, Risk: {current_accumulated_state.get('risk_score')}")
+                    elif not key.startswith("__"):
+                        # Direct key-value pair
+                        current_accumulated_state[key] = value
         
         # Complete progress
         progress_bar.progress(100)
         status_text.text("✅ Analysis completed!")
         
-        # Store results for display
+        # Store results for display with detailed timing
         analysis_time = time.perf_counter() - start_time
+        
+        # Debug: Print final accumulated state before storing
+        print(f"DEBUG Final UI State: Classification={current_accumulated_state.get('classification')}, Risk={current_accumulated_state.get('risk_score')}, Reason={current_accumulated_state.get('reason')}")
+        print(f"DEBUG All State Keys: {list(current_accumulated_state.keys())}")
+        
         st.session_state.analysis_results = {
             "final_decision": current_accumulated_state.get("classification", "Unknown"),
             "risk_score": current_accumulated_state.get("risk_score", 0.0),
@@ -407,8 +433,17 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
             "attack_detection": current_accumulated_state.get("attack_detection", {}),
             "reason": current_accumulated_state.get("reason", "No reason provided"),
             "safe_prompt": current_accumulated_state.get("final_prompt", ""),
-            "llm_response": current_accumulated_state.get("llm_response", "")
+            "llm_response": current_accumulated_state.get("llm_response", ""),
+            "bypass_used": current_accumulated_state.get("bypass_used", False),
+            "rewrite_time": current_accumulated_state.get("rewrite_time", 0.0),
+            "llm_time": current_accumulated_state.get("llm_time", 0.0),
+            "verification_time": current_accumulated_state.get("verification_time", 0.0),
+            "search_time": current_accumulated_state.get("search_time", 0.0),
+            "response_verdict": current_accumulated_state.get("response_verdict", "Unknown")
         }
+        
+        # Debug: Print what we're storing in session state
+        print(f"DEBUG Session State: {st.session_state.analysis_results}")
         st.session_state.analysis_complete = True
         
         # Clear progress indicators before rerun
@@ -429,19 +464,31 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     # Analysis completed header
     st.markdown('<div class="analysis-header">Analysis Completed</div>', unsafe_allow_html=True)
     
-    # Top 3 metrics side by side
+    # Top 4 metrics side by side - with fallback handling
+    classification = results.get("final_decision", "Unknown")
+    risk_score = results.get("risk_score", 0.0)
+    bypass_text = "⚡ Fast" if results.get("bypass_used") else "🧠 Deep"
+    
+    # Ensure risk_score is a number
+    if not isinstance(risk_score, (int, float)):
+        risk_score = 0.0
+    
     st.markdown(f'''
     <div class="top-metrics">
         <div class="metric-card">
-            <div class="metric-title">Final Decision</div>
-            <div class="metric-value">{results["final_decision"]}</div>
+            <div class="metric-title">Classification</div>
+            <div class="metric-value">{classification}</div>
         </div>
         <div class="metric-card">
             <div class="metric-title">Risk Score</div>
-            <div class="metric-value">{int(results["risk_score"] * 100)}%</div>
+            <div class="metric-value">{int(risk_score * 100)}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-title">Analysis Time</div>
+            <div class="metric-title">Analysis Type</div>
+            <div class="metric-value">{bypass_text}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">Total Time</div>
             <div class="metric-value">{results["analysis_time"]:.2f}s</div>
         </div>
     </div>
@@ -466,29 +513,51 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     </div>
     ''', unsafe_allow_html=True)
     
-    # Reasoning section
+    # Detailed Analysis section
+    timing_breakdown = []
+    if results.get("rewrite_time", 0) > 0:
+        timing_breakdown.append(f"Rewrite: {results['rewrite_time']:.2f}s")
+    if results.get("llm_time", 0) > 0:
+        timing_breakdown.append(f"LLM: {results['llm_time']:.2f}s")
+    if results.get("verification_time", 0) > 0:
+        timing_breakdown.append(f"Verification: {results['verification_time']:.2f}s")
+    if results.get("search_time", 0) > 0:
+        timing_breakdown.append(f"Search: {results['search_time']:.2f}s")
+    
+    timing_text = " | ".join(timing_breakdown) if timing_breakdown else "Fast bypass used"
+    
     st.markdown(f'''
     <div class="section-card">
-        <div class="section-title">Reasoning</div>
-        <div class="section-content">{results["reason"]}</div>
+        <div class="section-title">🔍 Analysis Details</div>
+        <div class="section-content">
+            <strong>Reasoning:</strong> {results["reason"]}<br>
+            <strong>Processing Breakdown:</strong> {timing_text}<br>
+            <strong>Response Quality:</strong> {results.get("response_verdict", "Not verified")}
+        </div>
     </div>
     ''', unsafe_allow_html=True)
     
-    # Alternate safe prompt section
-    if results["safe_prompt"] and results["safe_prompt"] != results.get("original_prompt", ""):
+    # Rewrite section (if applicable)
+    if results["safe_prompt"] and results["safe_prompt"] != prompt:
+        rewrite_time_text = f" (Generated in {results.get('rewrite_time', 0):.2f}s)" if results.get('rewrite_time', 0) > 0 else ""
         st.markdown(f'''
         <div class="section-card">
-            <div class="section-title">Alternate Safe Prompt</div>
+            <div class="section-title">🔄 Rewritten Safe Prompt{rewrite_time_text}</div>
             <div class="section-content">{results["safe_prompt"]}</div>
         </div>
         ''', unsafe_allow_html=True)
     
     # LLM Response section
     if results["llm_response"]:
+        llm_time_text = f" (Generated in {results.get('llm_time', 0):.2f}s)" if results.get('llm_time', 0) > 0 else ""
+        verify_time_text = f" (Verified in {results.get('verification_time', 0):.2f}s)" if results.get('verification_time', 0) > 0 else ""
         st.markdown(f'''
         <div class="section-card">
-            <div class="section-title">LLM Response for Alternate Safe Prompt</div>
+            <div class="section-title">🤖 LLM Response{llm_time_text}</div>
             <div class="section-content">{results["llm_response"]}</div>
+            <div style="margin-top: 1rem; font-size: 0.9rem; color: #6c7293;">
+                <strong>Verification:</strong> {results.get("response_verdict", "Not verified")}{verify_time_text}
+            </div>
         </div>
         ''', unsafe_allow_html=True)
     
