@@ -32,7 +32,13 @@ class FastClassifier:
     
     # High-confidence blocked patterns
     BLOCKED_PATTERNS = [
-        # Add blocked patterns here
+        r"ignore.*previous.*instructions",
+        r"forget.*safety.*guidelines",
+        r"you.*are.*now.*dan",
+        r"override.*programming",
+        r"act.*as.*if.*no.*restrictions",
+        r"system.*prompt",
+        r"jailbreak.*mode"
     ]
     
     # High-confidence risky patterns
@@ -43,6 +49,8 @@ class FastClassifier:
     def __init__(self):
         self.malicious_regex = re.compile("|".join(self.MALICIOUS_PATTERNS), re.IGNORECASE)
         self.safe_regex = re.compile("|".join(self.SAFE_PATTERNS), re.IGNORECASE)
+        self.blocked_regex = re.compile("|".join(self.BLOCKED_PATTERNS), re.IGNORECASE)
+        self.risky_regex = re.compile("|".join(self.RISKY_PATTERNS), re.IGNORECASE)
         self.blocked_patterns = self.BLOCKED_PATTERNS
         self.risky_patterns = self.RISKY_PATTERNS
         self.safe_patterns = self.SAFE_PATTERNS
@@ -55,15 +63,14 @@ class FastClassifier:
         prompt_lower = prompt.lower()
         
         # Check for blocked patterns first (highest priority)
-        for pattern in self.blocked_patterns:
-            if re.search(pattern, prompt_lower):
-                return {
-                    "classification": "Blocked",
-                    "risk_score": 0.9,
-                    "reason": f"Contains blocked pattern: {pattern}",
-                    "bypass_used": True,
-                    "confidence": 0.95
-                }
+        if self.blocked_regex.search(prompt_lower):
+            return {
+                "classification": "Blocked",
+                "risk_score": 0.95,
+                "reason": f"Direct system manipulation attempt - blocked pattern detected",
+                "bypass_used": True,
+                "confidence": 0.98
+            }
         
         # Enhanced risky pattern detection
         risky_keywords = [

@@ -206,8 +206,8 @@ def build_firewall_graph():
     g.add_conditional_edges(
         "analysis",
         lambda s: (
-            "block" if s.get("risk_score", 0) >= BLOCK_T or s.get("classification") == "Blocked" else
-            "rewrite" if s.get("risk_score", 0) >= RISKY_T or s.get("classification") == "Risky" else
+            "block" if s.get("classification") == "Blocked" or s.get("risk_score", 0) >= BLOCK_T else
+            "rewrite" if s.get("classification") == "Risky" or s.get("risk_score", 0) >= RISKY_T else
             "passthrough"  # Safe prompts go through LLM for response
         ),
         {"passthrough": "passthrough", "rewrite": "rewrite", "block": "block"},

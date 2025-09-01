@@ -31,12 +31,12 @@ def load_dark_theme():
     
     /* Header styling */
     .main-header {
-        background: rgba(30, 30, 46, 0.9);
-        padding: 2rem 1rem 1rem 1rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
+        text-align: center;
+        padding: 1rem 0 1.5rem 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 15px;
+        margin-bottom: 1rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
     
     .main-title {
@@ -103,7 +103,7 @@ def load_dark_theme():
         border-radius: 8px !important;
         padding: 0.75rem 2rem !important;
         font-size: 1.1rem !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         transition: all 0.3s ease !important;
         box-shadow: 0 4px 15px rgba(116, 185, 255, 0.3) !important;
         width: 100% !important;
@@ -138,36 +138,7 @@ def load_dark_theme():
         backdrop-filter: blur(10px);
     }
     
-    .analysis-header {
-        text-align: center;
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #ffffff;
-        margin-bottom: 2.5rem;
-        padding: 1.5rem;
-        background: linear-gradient(135deg, rgba(116, 185, 255, 0.2) 0%, rgba(9, 132, 227, 0.15) 100%);
-        border-radius: 12px;
-        border: 1px solid rgba(116, 185, 255, 0.3);
-        text-shadow: 0 0 10px rgba(116, 185, 255, 0.5);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .analysis-header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-        animation: shimmer 2s infinite;
-    }
-    
-    @keyframes shimmer {
-        0% { left: -100%; }
-        100% { left: 100%; }
-    }
+    /* Removed analysis-header styles - no longer used */
     
     .top-metrics {
         display: flex;
@@ -177,12 +148,12 @@ def load_dark_theme():
     
     .metric-card {
         flex: 1;
-        background: linear-gradient(135deg, rgba(45, 45, 68, 0.9) 0%, rgba(62, 62, 94, 0.8) 100%);
+        background: transparent;
         padding: 2rem 1.5rem;
         border-radius: 14px;
         text-align: center;
         border: 1px solid rgba(116, 185, 255, 0.2);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        box-shadow: none;
         transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
@@ -208,6 +179,10 @@ def load_dark_theme():
         font-weight: 800;
         color: #ffffff;
         text-shadow: 0 0 15px rgba(116, 185, 255, 0.4);
+    }
+    
+    .metric-value.completed {
+        font-weight: 700;
     }
     
     .section-card {
@@ -299,12 +274,7 @@ st.set_page_config(
 load_dark_theme()
 
 # Main header
-st.markdown("""
-<div class="main-header">
-    <h1 class="main-title">🛡️ NeuroShield GenAI Security Platform</h1>
-    <p class="subtitle">Multi-tier security with real-time analysis of LLM traffic</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1 class="title">NeuroShield GenAI Security Platform 🛡️</h1><p class="subtitle">Multi-tier security with real-time analysis of LLM traffic</p></div>', unsafe_allow_html=True)
 
 # Initialize session state for results
 if "analysis_results" not in st.session_state:
@@ -314,15 +284,10 @@ if "analysis_complete" not in st.session_state:
 if "current_step" not in st.session_state:
     st.session_state.current_step = 0
 
-# Input section
-st.markdown("""
-<div class="input-section">
-    <label class="input-label">Enter your prompt</label>
-    <span class="input-description">Describe your request or question for the model...</span>
-</div>
-""", unsafe_allow_html=True)
+# Input section with plain text
+st.markdown('<span style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem; display: block;">Enter your prompt:</span>', unsafe_allow_html=True)
 
-prompt = st.text_area("Enter your prompt", height=120, key="prompt", placeholder="Type your prompt here...", label_visibility="collapsed")
+prompt = st.text_area("Enter your prompt", height=120, key="prompt", placeholder="Describe your request or question for the model...", label_visibility="collapsed")
 
 # Paste LLM response toggle
 paste_toggle = st.checkbox("🔄 Paste LLM response", key="paste_toggle_firewall", help="Enable this to paste an existing LLM response for verification")
@@ -374,9 +339,28 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
     try:
         current_accumulated_state: State = initial_graph_state.copy()
         
-        # Create progress bar for better UX
+        # Create progress bar and initial tiles
         progress_bar = st.progress(0)
         status_text = st.empty()
+        
+        # Show initial 3 tiles immediately
+        initial_tiles = st.empty()
+        initial_tiles.markdown(f'''
+        <div class="top-metrics">
+            <div class="metric-card">
+                <div class="metric-title">Classification</div>
+                <div class="metric-value">Analyzing...</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Risk Score</div>
+                <div class="metric-value">0.000</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Analysis Time</div>
+                <div class="metric-value">0.00s</div>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
         
         status_text.text("🔍 Initializing security analysis...")
         progress_bar.progress(10)
@@ -415,6 +399,24 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
                         # Direct key-value pair
                         current_accumulated_state[key] = value
         
+        # Update initial tiles with final results
+        initial_tiles.markdown(f'''
+        <div class="top-metrics">
+            <div class="metric-card">
+                <div class="metric-title">Classification</div>
+                <div class="metric-value">{current_accumulated_state.get("classification", "Unknown")}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Risk Score</div>
+                <div class="metric-value">{current_accumulated_state.get("risk_score", 0.0):.3f}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Analysis Time</div>
+                <div class="metric-value">{time.perf_counter() - start_time:.2f}s</div>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+        
         # Complete progress
         progress_bar.progress(100)
         status_text.text("✅ Analysis completed!")
@@ -449,6 +451,7 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
         # Clear progress indicators before rerun
         progress_bar.empty()
         status_text.empty()
+        initial_tiles.empty()  # Clear the initial tiles
         st.rerun()
         
     except Exception as e:
@@ -461,9 +464,6 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     # Results container
     st.markdown('<div class="results-container">', unsafe_allow_html=True)
     
-    # Analysis completed header
-    st.markdown('<div class="analysis-header">Analysis Completed</div>', unsafe_allow_html=True)
-    
     # Top 4 metrics side by side - with fallback handling
     classification = results.get("final_decision", "Unknown")
     risk_score = results.get("risk_score", 0.0)
@@ -473,22 +473,23 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     if not isinstance(risk_score, (int, float)):
         risk_score = 0.0
     
+    # Show final 4 tiles with results
     st.markdown(f'''
     <div class="top-metrics">
+        <div class="metric-card">
+            <div class="metric-title">Analysis Completed</div>
+            <div class="metric-value completed">✅</div>
+        </div>
         <div class="metric-card">
             <div class="metric-title">Classification</div>
             <div class="metric-value">{classification}</div>
         </div>
         <div class="metric-card">
             <div class="metric-title">Risk Score</div>
-            <div class="metric-value">{int(risk_score * 100)}%</div>
+            <div class="metric-value">{risk_score:.3f}</div>
         </div>
         <div class="metric-card">
-            <div class="metric-title">Analysis Type</div>
-            <div class="metric-value">{bypass_text}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title">Total Time</div>
+            <div class="metric-title">Analysis Time</div>
             <div class="metric-value">{results["analysis_time"]:.2f}s</div>
         </div>
     </div>
@@ -528,11 +529,9 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     
     st.markdown(f'''
     <div class="section-card">
-        <div class="section-title">🔍 Analysis Details</div>
+        <div class="section-title">🧠 Reasoning</div>
         <div class="section-content">
-            <strong>Reasoning:</strong> {results["reason"]}<br>
-            <strong>Processing Breakdown:</strong> {timing_text}<br>
-            <strong>Response Quality:</strong> {results.get("response_verdict", "Not verified")}
+            <strong>Analysis:</strong> {results["reason"]}
         </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -540,10 +539,11 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     # Rewrite section (if applicable)
     if results["safe_prompt"] and results["safe_prompt"] != prompt:
         rewrite_time_text = f" (Generated in {results.get('rewrite_time', 0):.2f}s)" if results.get('rewrite_time', 0) > 0 else ""
+        safe_prompt_display = results["safe_prompt"] if results["safe_prompt"] != "[BLOCKED]" else "⛔ Blocked."
         st.markdown(f'''
         <div class="section-card">
             <div class="section-title">🔄 Rewritten Safe Prompt{rewrite_time_text}</div>
-            <div class="section-content">{results["safe_prompt"]}</div>
+            <div class="section-content">{safe_prompt_display}</div>
         </div>
         ''', unsafe_allow_html=True)
     
