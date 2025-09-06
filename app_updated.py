@@ -1,10 +1,12 @@
 from __future__ import annotations
 import json, math, re, time
 from pathlib import Path
+import textwrap
 from typing import Any, Dict
 from collections import defaultdict
 import datetime
 import time  # Ensure time is imported
+import html
 
 import streamlit as st
 
@@ -15,9 +17,53 @@ import os
 from langgraph_core.firewall_graph import build_firewall_graph, State
 
 import logging
+
+
 logging.basicConfig(
     level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
+
+# Sanitize model/user text and render safely
+def _sanitize_text(text: str) -> str:
+    if not text:
+        return ""
+    lines = (text or "").splitlines()
+    cleaned = []
+    for ln in lines:
+        s = ln.strip()
+        # Drop bare HTML tag lines that might have leaked
+        if re.fullmatch(r"</?[a-zA-Z][^>]*>", s):
+            continue
+        # Drop our known container tags if they appear as lines
+        if s.startswith(("<div", "</div", "<details", "</details")) and s.endswith(">"):
+            continue
+        cleaned.append(ln)
+    text2 = "\n".join(cleaned).strip()
+    # Remove trailing repeated closers
+    text2 = re.sub(r"(</div>\s*)+$", "", text2, flags=re.IGNORECASE)
+    # Remove HTML comments and any inline tags anywhere
+    text2 = re.sub(r"<!--.*?-->", "", text2, flags=re.DOTALL)
+    text2 = re.sub(r"</?(div|details|summary|section|span|pre|code|ul|li|strong|em|p|h[1-6]|br|hr)[^>]*>", "", text2, flags=re.IGNORECASE)
+    # If any remaining generic tags exist, strip them too as a last resort
+    text2 = re.sub(r"</?[^>]+>", "", text2)
+    # Remove encoded tags like &lt;div ...&gt;
+    text2 = re.sub(r"&lt;!--.*?--&gt;", "", text2, flags=re.DOTALL)
+    text2 = re.sub(r"&lt;/?(div|details|summary|section|span|pre|code|ul|li|strong|em|p|h[1-6]|br|hr)[^&]*&gt;", "", text2, flags=re.IGNORECASE)
+    text2 = re.sub(r"&lt;/?[^&]+?&gt;", "", text2)
+    # Remove any of our UI-specific class mentions if they leaked as text
+    text2 = re.sub(r"section-(card|title|content)|results-container", "", text2, flags=re.IGNORECASE)
+    return text2
+
+def _render_text_block(text: str) -> str:
+    safe = _sanitize_text(text)
+    # After sanitization, still escape to avoid any residual angle brackets
+    return f'<div style="margin:0; white-space:pre-wrap;">{html.escape(safe)}</div>'
+
+# Configure Streamlit runtime options early
+try:
+    st.set_option('server.fileWatcherType', 'poll')  # avoid cross-drive watchdog on Windows
+except Exception:
+    pass
 
 # Custom CSS for dark theme
 def load_dark_theme():
@@ -31,11 +77,11 @@ def load_dark_theme():
     
     /* Header styling */
     .main-header {
-        text-align: center;
-        padding: 1rem 0 1.5rem 0;
+        text-align: left;
+        padding: 1rem 1.5rem 1.5rem 1.5rem;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 15px;
-        margin-bottom: 1rem;
+        margin: 1rem 0 1rem 0;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
     
@@ -45,6 +91,7 @@ def load_dark_theme():
         color: #ffffff;
         margin-bottom: 0.5rem;
         text-shadow: 0 0 20px rgba(116, 185, 255, 0.3);
+        text-align: left;
     }
     
     .subtitle {
@@ -52,6 +99,7 @@ def load_dark_theme():
         color: #b4b4c8;
         margin-bottom: 0;
         font-weight: 400;
+        text-align: left;
     }
     
     /* Input section styling */
@@ -93,6 +141,13 @@ def load_dark_theme():
     .stTextArea > div > div > textarea:focus {
         border-color: #74b9ff !important;
         box-shadow: 0 0 0 2px rgba(116, 185, 255, 0.2) !important;
+    }
+    
+    .stTextArea > div > div > textarea:disabled {
+        background: rgba(45, 45, 68, 0.3) !important;
+        border: 2px solid rgba(108, 114, 147, 0.3) !important;
+        color: #6c7293 !important;
+        cursor: not-allowed !important;
     }
     
     /* Button styling */
@@ -245,9 +300,9 @@ def load_dark_theme():
     }
     
     /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    #MainMenu {display: none !important;}
+    footer {display: none !important;}
+    header {display: none !important;}
     
     /* Custom loading animation */
     @keyframes pulse {
@@ -256,8 +311,50 @@ def load_dark_theme():
         100% { box-shadow: 0 0 0 0 rgba(116, 185, 255, 0); }
     }
     
+    /* Warning status styling */
+    .warning-status {
+        color: #fdcb6e;
+        font-weight: 600;
+        text-shadow: 0 0 10px rgba(253, 203, 110, 0.4);
+    }
+    
+    .neutral-status {
+        color: #74b9ff;
+        font-weight: 600;
+        text-shadow: 0 0 10px rgba(116, 185, 255, 0.4);
+    }
+    
     .pulse-animation {
         animation: pulse 2s infinite;
+    }
+    
+    /* Ensure progress bar and status text are properly hidden */
+    .stProgress > div > div > div > div {
+        background: transparent !important;
+    }
+    
+    .stProgress > div > div > div > div > div {
+        background: linear-gradient(90deg, #74b9ff, #0984e3) !important;
+    }
+    
+    /* Hide empty status text */
+    .element-container:has(.stEmpty) {
+        display: none !important;
+    }
+
+    /* Prevent stray empty blocks from rendering as dark bars */
+    .results-container > div:empty {
+        display: none !important;
+        height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: 0 !important;
+    }
+
+    /* Ensure no pseudo elements overlay the metrics row */
+    .top-metrics::before {
+        content: none !important;
+        display: none !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -285,15 +382,37 @@ if "current_step" not in st.session_state:
     st.session_state.current_step = 0
 
 # Input section with plain text
-st.markdown('<span style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem; display: block;">Enter your prompt:</span>', unsafe_allow_html=True)
+# Use placeholders so we can render the toggle first (to get its value) while keeping visual order
+prompt_label_html = '<span style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem; display: block;">Enter your prompt:</span>'
+st.markdown(prompt_label_html, unsafe_allow_html=True)
+prompt_placeholder = st.empty()      # Reserve space for the prompt textarea (above)
+toggle_placeholder = st.empty()      # Reserve space for the toggle (below the prompt)
 
-prompt = st.text_area("Enter your prompt", height=120, key="prompt", placeholder="Describe your request or question for the model...", label_visibility="collapsed")
+# Render the toggle in its reserved place to capture its value
+paste_toggle = toggle_placeholder.checkbox(
+    "🔄 Paste LLM response",
+    key="paste_toggle_firewall",
+    help="Enable this to paste an existing LLM response for verification"
+)
 
-# Paste LLM response toggle
-paste_toggle = st.checkbox("🔄 Paste LLM response", key="paste_toggle_firewall", help="Enable this to paste an existing LLM response for verification")
+# Now render the prompt into its reserved spot, disabled when paste mode is ON
+prompt = prompt_placeholder.text_area(
+    "Enter your prompt",
+    height=120,
+    key="prompt",
+    placeholder="Describe your request or question for the model...",
+    label_visibility="collapsed",
+    disabled=paste_toggle  # When paste toggle is ON, block the prompt box
+)
+
 pasted_llm_response = ""
 if paste_toggle:
+    st.markdown('<span style="font-size: 1.1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem; display: block;">Paste LLM Response:</span>', unsafe_allow_html=True)
     pasted_llm_response = st.text_area("LLM Response", height=120, key="pasted_llm_response_area", placeholder="Paste the LLM response here...")
+else:
+    # Clear the response when toggle is off
+    if "pasted_llm_response_area" in st.session_state:
+        st.session_state.pasted_llm_response_area = ""
 
 # Initialize placeholders for sequential sections
 section_placeholders = {
@@ -305,7 +424,7 @@ section_placeholders = {
 }
 
 # Button logic
-is_prompt_present = bool(prompt.strip())
+is_prompt_present = bool(prompt.strip()) and not paste_toggle
 is_pasted_response_present = bool(pasted_llm_response.strip()) and paste_toggle
 analyze_button_disabled = not (is_prompt_present or is_pasted_response_present)
 
@@ -323,7 +442,7 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
     # Start analysis with optimized backend
     graph = build_firewall_graph()
     initial_graph_state: State = {
-        "user_prompt": prompt,
+        "user_prompt": ("" if paste_toggle else prompt),
         "classification": "",
         "risk_score": 0.0,
         "reason": "",
@@ -333,6 +452,8 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
     }
     if paste_toggle and pasted_llm_response:
         initial_graph_state["llm_response"] = pasted_llm_response
+        # Skip verification for pasted responses - they are already the "response" to verify
+        initial_graph_state["skip_verification"] = True
 
     start_time = time.perf_counter()
     
@@ -431,17 +552,27 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
         st.session_state.analysis_results = {
             "final_decision": current_accumulated_state.get("classification", "Unknown"),
             "risk_score": current_accumulated_state.get("risk_score", 0.0),
-            "analysis_time": analysis_time,
+            "reason": current_accumulated_state.get("reason", "No analysis performed"),
             "attack_detection": current_accumulated_state.get("attack_detection", {}),
-            "reason": current_accumulated_state.get("reason", "No reason provided"),
             "safe_prompt": current_accumulated_state.get("final_prompt", ""),
             "llm_response": current_accumulated_state.get("llm_response", ""),
             "bypass_used": current_accumulated_state.get("bypass_used", False),
+            "analysis_time": analysis_time,
             "rewrite_time": current_accumulated_state.get("rewrite_time", 0.0),
             "llm_time": current_accumulated_state.get("llm_time", 0.0),
             "verification_time": current_accumulated_state.get("verification_time", 0.0),
             "search_time": current_accumulated_state.get("search_time", 0.0),
-            "response_verdict": current_accumulated_state.get("response_verdict", "Unknown")
+            "response_verdict": current_accumulated_state.get("response_verdict", "Unknown"),
+            "raw_verifier_output": current_accumulated_state.get("raw_verifier_output", ""),
+            "corrected_llm_response": current_accumulated_state.get("corrected_llm_response", ""),
+            "correction_time": current_accumulated_state.get("correction_time", 0.0),
+            "final_llm_response": current_accumulated_state.get("final_llm_response", ""),
+            "final_response_source": current_accumulated_state.get("final_response_source", ""),
+            "final_response_time": current_accumulated_state.get("final_response_time", 0.0),
+            "response_security": current_accumulated_state.get("response_security", {}),
+            "response_security_time": current_accumulated_state.get("response_security_time", 0.0),
+            "is_response_analysis": bool(paste_toggle and bool(pasted_llm_response.strip())),
+            "input_mode": ("paste" if paste_toggle and pasted_llm_response.strip() else "prompt")
         }
         
         # Debug: Print what we're storing in session state
@@ -452,6 +583,11 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
         progress_bar.empty()
         status_text.empty()
         initial_tiles.empty()  # Clear the initial tiles
+        
+        # Small delay to ensure UI updates
+        time.sleep(0.1)
+        
+        # Force a rerun to update the UI
         st.rerun()
         
     except Exception as e:
@@ -461,11 +597,7 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
 if st.session_state.analysis_complete and st.session_state.analysis_results:
     results = st.session_state.analysis_results
     
-    # Results container
-    st.markdown('<div class="results-container">', unsafe_allow_html=True)
-    
-    # Top 4 metrics side by side - with fallback handling
-    classification = results.get("final_decision", "Unknown")
+    # Compose entire results into a single container to avoid empty wrapper artifacts
     risk_score = results.get("risk_score", 0.0)
     bypass_text = "⚡ Fast" if results.get("bypass_used") else "🧠 Deep"
     
@@ -473,48 +605,69 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     if not isinstance(risk_score, (int, float)):
         risk_score = 0.0
     
-    # Show final 4 tiles with results
-    st.markdown(f'''
-    <div class="top-metrics">
-        <div class="metric-card">
-            <div class="metric-title">Analysis Completed</div>
-            <div class="metric-value completed">✅</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title">Classification</div>
-            <div class="metric-value">{classification}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title">Risk Score</div>
-            <div class="metric-value">{risk_score:.3f}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-title">Analysis Time</div>
-            <div class="metric-value">{results["analysis_time"]:.2f}s</div>
-        </div>
-    </div>
-    ''', unsafe_allow_html=True)
+    # Determine analysis mode based on stored results, not the current toggle
+    is_response_analysis = bool(results.get("is_response_analysis", False))
     
-    # Classification section
-    attack_types = []
-    if results["attack_detection"]:
-        for attack_type, details in results["attack_detection"].items():
-            if isinstance(details, dict) and details.get("detected"):
-                attack_types.append(attack_type.replace("_", " ").title())
-    
-    if attack_types:
-        classification_text = f'<span class="threat-status">🚨 Threats Detected:</span> {", ".join(attack_types)}'
+    # Set classification based on analysis type
+    if is_response_analysis:
+        # For pasted responses, show factual accuracy (normalized)
+        response_verdict = str(results.get("response_verdict", "Unknown")).strip()
+        v_lc = response_verdict.lower()
+        # Normalize
+        if ("incorrect" in v_lc) or ("halluc" in v_lc):
+            classification = "Factually incorrect"
+            response_category = "incorrect"
+        elif "partial" in v_lc:
+            classification = "Partially correct"
+            response_category = "partial"
+        elif "correct" in v_lc:
+            classification = "Factually correct"
+            response_category = "correct"
+        elif ("unverif" in v_lc) or ("unknown" in v_lc) or (not v_lc):
+            classification = "Unverifiable"
+            response_category = "unverifiable"
+        else:
+            classification = response_verdict
+            response_category = "other"
+
+        # If the final response came from a verified generation, upgrade Unknown/Unverifiable display to Factually correct
+        final_src_norm = (results.get("final_response_source") or "").strip()
+        if response_category in ("unverifiable", "other") and final_src_norm in (
+            "generated_verified", "generated_verified_from_response", "pasted_verified",
+        ):
+            classification = "Factually correct"
+            response_category = "correct"
     else:
-        classification_text = f'<span class="safe-status">✅ Security Analysis Complete:</span> Content passed all security checks successfully'
+        # For prompts, show the security classification
+        classification = results.get("final_decision", "Unknown")
     
-    st.markdown(f'''
-    <div class="section-card">
-        <div class="section-title">🔍 Security Classification</div>
-        <div class="section-content">{classification_text}</div>
-    </div>
-    ''', unsafe_allow_html=True)
+    # Prepare classification details based on analysis type
+    if is_response_analysis:
+        # For pasted LLM responses, show factual accuracy (normalized)
+        if response_category == "correct":
+            classification_text = f'<span class="safe-status">✅ Response Verification:</span> Content is factually accurate'
+        elif response_category == "partial":
+            classification_text = f'<span class="warning-status">⚠️ Response Verification:</span> Content has minor inaccuracies or missing details'
+        elif response_category == "incorrect":
+            classification_text = f'<span class="threat-status">❌ Response Verification:</span> Content contains factual errors or hallucinations'
+        elif response_category == "unverifiable":
+            classification_text = f'<span class="neutral-status">❓ Response Verification:</span> Content cannot be verified with available sources'
+        else:
+            classification_text = f'<span class="neutral-status">🔍 Response Verification:</span> {classification}'
+    else:
+        # For prompt analysis, show security threats
+        attack_types = []
+        if results["attack_detection"]:
+            for attack_type, details in results["attack_detection"].items():
+                if isinstance(details, dict) and details.get("detected"):
+                    attack_types.append(attack_type.replace("_", " ").title())
+        
+        if attack_types:
+            classification_text = f'<span class="threat-status">🚨 Threats Detected:</span> {", ".join(attack_types)}'
+        else:
+            classification_text = f'<span class="safe-status">✅ Security Analysis Complete:</span> Content passed all security checks successfully'
     
-    # Detailed Analysis section
+    # Timing breakdown (currently for future use)
     timing_breakdown = []
     if results.get("rewrite_time", 0) > 0:
         timing_breakdown.append(f"Rewrite: {results['rewrite_time']:.2f}s")
@@ -526,42 +679,222 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         timing_breakdown.append(f"Search: {results['search_time']:.2f}s")
     
     timing_text = " | ".join(timing_breakdown) if timing_breakdown else "Fast bypass used"
-    
-    st.markdown(f'''
-    <div class="section-card">
-        <div class="section-title">🧠 Reasoning</div>
-        <div class="section-content">
-            <strong>Analysis:</strong> {results["reason"]}
+
+    # Build the entire HTML for results in one go to avoid blank container artifacts
+    parts = []
+    parts.append('<div class="results-container">')
+    parts.append(textwrap.dedent(f'''<div class="top-metrics">
+        <div class="metric-card">
+            <div class="metric-title">Analysis Status</div>
+            <div class="metric-value completed">Completed</div>
         </div>
-    </div>
-    ''', unsafe_allow_html=True)
+        <div class="metric-card">
+            <div class="metric-title">{"Verification" if is_response_analysis else "Classification"}</div>
+            <div class="metric-value">{classification}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">Risk Score</div>
+            <div class="metric-value">{risk_score:.3f}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-title">Analysis Time</div>
+            <div class="metric-value">{results["analysis_time"]:.2f}s</div>
+        </div>
+    </div>'''))
+
+    # Classification section
+    parts.append(textwrap.dedent(f'''<div class="section-card">
+        <div class="section-title">🔍 Security Classification</div>
+        <div class="section-content">{classification_text}</div>
+    </div>'''))
+
+    # Reasoning section - adapt based on analysis type
+    if is_response_analysis:
+        reasoning_title = "🔍 Verification Analysis"
+        # Show the normalized/overridden classification rather than raw model text
+        reasoning_content = classification
+        # Get detailed reason from verifier if available
+        verifier_reason = ""
+        if "raw_verifier_output" in results:
+            raw_output = results["raw_verifier_output"]
+            # Extract reason from verifier output
+            for line in raw_output.split('\n'):
+                if line.strip().lower().startswith('reason:'):
+                    verifier_reason = line.split(':', 1)[1].strip()
+                    break
+        
+        if verifier_reason:
+            reasoning_detail = f"<strong>Verdict:</strong> {reasoning_content}<br><strong>Analysis:</strong> {verifier_reason}"
+        else:
+            reasoning_detail = f"<strong>Verdict:</strong> {reasoning_content}<br><strong>Analysis:</strong> {results.get('reason', 'Response analyzed for factual accuracy')}"
+    else:
+        reasoning_title = "🧠 Security Reasoning"
+        reasoning_detail = f"<strong>Analysis:</strong> {results['reason']}"
     
-    # Rewrite section (if applicable)
+    parts.append(textwrap.dedent(f'''<div class="section-card">
+        <div class="section-title">{reasoning_title}</div>
+        <div class="section-content">
+            {reasoning_detail}
+        </div>
+    </div>'''))
+
+    # Response-level security check section (works for pasted and generated responses)
+    sec = results.get("response_security") or {}
+    if sec:
+        sec_cls = str(sec.get("classification", "Safe"))
+        sec_risk = float(sec.get("risk_score", 0.0) or 0.0)
+        sec_reason = str(sec.get("reason", "No security risks detected"))
+        sec_time = float(results.get("response_security_time", 0.0) or 0.0)
+        det = sec.get("adversarial_detections") or {}
+        det_count = int(sec.get("detection_count", len(det)))
+
+        badge = (
+            '<span class="threat-status">🚨 Blocked</span>' if sec_cls == "Blocked" else
+            '<span class="warning-status">⚠️ Risky</span>' if sec_cls == "Risky" else
+            '<span class="safe-status">✅ Safe</span>'
+        )
+
+        # Friendlier labels and short explanations for non-experts
+        label_map = {
+            "statistical_anomalies": "Formatting irregularities",
+            "encoding": "Encoded content detected",
+            "obfuscation": "Obfuscation indicators",
+            "context_manipulation": "Context manipulation phrasing",
+            "social_engineering": "Social engineering language"
+        }
+        explain_map = {
+            "statistical_anomalies": "The text has small formatting quirks (e.g., punctuation/length mix). This is common in lists and is low risk.",
+            "encoding": "Contains long encoded strings (like base64). Could hide instructions.",
+            "obfuscation": "Uses techniques that can hide intent (e.g., 'translate', 'decode').",
+            "context_manipulation": "Story/roleplay wording that may try to shift guardrails.",
+            "social_engineering": "Urgent/persuasive phrasing that could pressure actions."
+        }
+
+        # Build friendly summary
+        if sec_cls == "Safe" and (det_count == 0 or sec_risk < 0.1):
+            friendly_reason = "No security threats detected."
+            if det_count > 0:
+                friendly_reason += " Minor pattern noted (low risk)."
+        elif sec_cls == "Risky":
+            friendly_reason = "Potentially risky patterns detected. Review advised."
+        else:
+            friendly_reason = sec_reason or "Security assessment provided."
+
+        det_html = ""
+        if det_count > 0:
+            items = []
+            for k, v in det.items():
+                if not v:
+                    continue
+                label = label_map.get(k, k.replace("_", " ").title())
+                extra = []
+                if isinstance(v, dict):
+                    if "count" in v and v["count"]:
+                        extra.append(f"x{v['count']}")
+                    # show at most a short hint
+                    hint = explain_map.get(k)
+                    if hint:
+                        extra.append(hint)
+                suffix = f" – {' '.join(extra)}" if extra else ""
+                items.append(f"<li>{label}{suffix}</li>")
+            if items:
+                det_html = "<ul>" + "".join(items) + "</ul>"
+
+        # Hide trivial anomaly for safe content to avoid confusion
+        if sec_cls == "Safe" and det_count <= 1 and set(map(str, det.keys())) == {"statistical_anomalies"} and sec_risk < 0.1:
+            det_html = ""
+            friendly_reason = "No security threats detected."
+
+        parts.append(textwrap.dedent(f'''<div class="section-card">
+            <div class="section-title">🛡️ Response Security Check{' (%.2fs)' % sec_time if sec_time else ''}</div>
+            <div class="section-content">
+                <div><strong>Status:</strong> {badge} <span style="margin-left:0.5rem; color:#9ca3af;">(risk {sec_risk:.2f})</span></div>
+                <div style="margin-top:0.5rem;">{_render_text_block(friendly_reason)}</div>
+                {det_html}
+            </div>
+        </div>'''))
+
+    # Rewrite section (conditional)
     if results["safe_prompt"] and results["safe_prompt"] != prompt:
         rewrite_time_text = f" (Generated in {results.get('rewrite_time', 0):.2f}s)" if results.get('rewrite_time', 0) > 0 else ""
-        safe_prompt_display = results["safe_prompt"] if results["safe_prompt"] != "[BLOCKED]" else "⛔ Blocked."
-        st.markdown(f'''
-        <div class="section-card">
+        safe_prompt_display_raw = results["safe_prompt"] if results["safe_prompt"] != "[BLOCKED]" else "⛔ Blocked."
+        safe_prompt_display = _render_text_block(safe_prompt_display_raw)
+        parts.append(textwrap.dedent(f'''<div class="section-card">
             <div class="section-title">🔄 Rewritten Safe Prompt{rewrite_time_text}</div>
             <div class="section-content">{safe_prompt_display}</div>
-        </div>
-        ''', unsafe_allow_html=True)
-    
-    # LLM Response section
-    if results["llm_response"]:
+        </div>'''))
+
+    # LLM response section (conditional)
+    if results.get("llm_response") or results.get("final_llm_response"):
         llm_time_text = f" (Generated in {results.get('llm_time', 0):.2f}s)" if results.get('llm_time', 0) > 0 else ""
-        verify_time_text = f" (Verified in {results.get('verification_time', 0):.2f}s)" if results.get('verification_time', 0) > 0 else ""
-        st.markdown(f'''
-        <div class="section-card">
-            <div class="section-title">🤖 LLM Response{llm_time_text}</div>
-            <div class="section-content">{results["llm_response"]}</div>
-            <div style="margin-top: 1rem; font-size: 0.9rem; color: #6c7293;">
-                <strong>Verification:</strong> {results.get("response_verdict", "Not verified")}{verify_time_text}
-            </div>
-        </div>
-        ''', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        
+        if is_response_analysis:
+            # Prefer the graph-produced final_llm_response (verified/corrected/best-effort)
+            final_resp = (results.get("final_llm_response") or "").strip()
+            final_src = (results.get("final_response_source") or "").strip()
+            corrected = (results.get("corrected_llm_response") or "").strip()
+            if final_resp:
+                title_map = {
+                    "corrected": "🛠️ Corrected Final Response (Verified)",
+                    "generated_verified": "✅ Verified Final Response",
+                    "generated_verified_from_response": "✅ Verified Final Response",
+                    "generated_unverifiable": "ℹ️ Best-Effort Final Response",
+                    "generated_unverifiable_from_response": "ℹ️ Best-Effort Final Response",
+                    "pasted": "🤖 Final Response",
+                    "pasted_verified": "✅ Verified Final Response",
+                    "pasted_unverifiable": "ℹ️ Best-Effort Final Response"
+                }
+                title = title_map.get(final_src, "🤖 Final Response")
+                meta = []
+                if final_src == "corrected" and results.get("correction_time", 0):
+                    meta.append(f"<strong>Correction Time:</strong> {results['correction_time']:.2f}s")
+                if results.get("final_response_time", 0):
+                    meta.append(f"<strong>Final:</strong> {results['final_response_time']:.2f}s")
+                meta_html = ("<div style=\"margin-top: 0.75rem; font-size: 0.9rem; color: #6c7293;\">" + " ".join(meta) + "</div>") if meta else ""
+                parts.append(textwrap.dedent(f'''<div class="section-card">
+                    <div class="section-title">{title}</div>
+                    <div class="section-content">{_render_text_block(final_resp)}</div>
+                    {meta_html}
+                </div>'''))
+                # (Removed) Original Pasted Response block to prevent confusion and layout issues
+            else:
+                # Fallback to corrected or pasted as before
+                if response_category in ("incorrect", "partial") and corrected:
+                    corr_time = results.get("correction_time", 0.0)
+                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                        <div class="section-title">🛠️ Corrected Response (Verified)</div>
+                        <div class="section-content">{_render_text_block(corrected)}</div>
+                        <div style="margin-top: 0.75rem; font-size: 0.9rem; color: #6c7293;">
+                            <strong>Correction Time:</strong> {corr_time:.2f}s
+                        </div>
+                    </div>'''))
+                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                        <div class="section-title">📥 Original Pasted Response</div>
+                        <div class="section-content">
+                            <details>
+                                <summary style="cursor: pointer; color: #74b9ff;">Show original</summary>
+                                <div style="margin-top: 0.5rem;">{_render_text_block(results["llm_response"])}</div>
+                            </details>
+                        </div>
+                    </div>'''))
+                else:
+                    suffix = " (Verified Correct)" if response_category == "correct" else (" (Unverifiable)" if response_category == "unverifiable" else "")
+                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                        <div class="section-title">🤖 Pasted Response{suffix}</div>
+                        <div class="section-content">{_render_text_block(results["llm_response"])}</div>
+                    </div>'''))
+        else:
+            # For generated flows, just show the model's response (no verification line for clarity)
+            parts.append(textwrap.dedent(f'''<div class="section-card">
+                <div class="section-title">🤖 LLM Response{llm_time_text}</div>
+                <div class="section-content">{_render_text_block(results["llm_response"])}</div>
+            </div>'''))
+
+    # Close the container and render once
+    parts.append('</div>')
+    # Join without newlines to ensure Markdown never interprets as a code block
+    final_html = "".join(parts)
+    st.markdown(final_html, unsafe_allow_html=True)
 
 # Footer
 st.markdown("""

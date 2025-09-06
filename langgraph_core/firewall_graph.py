@@ -14,6 +14,7 @@ from agents.response_verifier_agent import ResponseVerifierAgent
 from agents.safe_prompt_agent import SafePromptAgent
 from agents.web_search_agent import WebSearchAgent
 from llm_utils import call_llm
+from utils.adversarial_detector import adversarial_detector
  
 BLOCK_T = 0.85  # hard block threshold
 RISKY_T = 0.60  # treat prompts above this as Risky regardless of LLM label
@@ -36,6 +37,16 @@ class State(TypedDict, total=False):
     code_fragment: str
     blockchain_log: bool
     attack_detection: Dict[str, Any]
+    # Response verification extras
+    corrected_llm_response: str
+    correction_time: float
+    raw_verifier_output: str
+    skip_verification: bool
+    final_llm_response: str
+    final_response_source: str
+    # Response-level security analysis
+    response_security: Dict[str, Any]
+    response_security_time: float
 
 analysis = InitialAnalysisAgent()
 rewriter = SafePromptAgent()
@@ -123,17 +134,25 @@ def n_verify(s: State) -> State:
     original_risk_score = s.get("risk_score", 0.0)
     original_reason = s.get("reason", "")
     
-    # Track verification timing
-    verify_start = time.perf_counter()
-
-    # always run verifier
-    v_result = verifier.run(p, r)
-    verify_time = time.perf_counter() - verify_start
+    # Skip verification if this is a pasted response (it IS the response to verify)
+    if s.get("skip_verification", False):
+        # For pasted responses, run verification but use the original prompt as context
+        original_prompt = s.get("user_prompt", "")
+        verify_start = time.perf_counter()
+        v_result = verifier.run(original_prompt, r)
+        verify_time = time.perf_counter() - verify_start
+    else:
+        # Track verification timing
+        verify_start = time.perf_counter()
+        # always run verifier
+        v_result = verifier.run(p, r)
+        verify_time = time.perf_counter() - verify_start
     
     # Store response verification separately (don't overwrite prompt classification)
     s["response_verdict"] = v_result.get("verdict", "Unknown")
     s["response_confidence"] = v_result.get("confidence", 0.0)
     s["verification_time"] = verify_time
+    s["raw_verifier_output"] = v_result.get("raw_verifier_output", "")
     
     # Preserve original prompt classification
     s["classification"] = original_classification
@@ -143,6 +162,14 @@ def n_verify(s: State) -> State:
     # decide if code validation needed
     if _has_code(r):
         s.update(code_validator.run(p, r))
+
+    # Response-level security scan (works even without code or prompt)
+    sec_start = time.perf_counter()
+    try:
+        s["response_security"] = adversarial_detector.detect_adversarial_patterns(r or "")
+    except Exception as _e:
+        s["response_security"] = {"classification": "Safe", "risk_score": 0.0, "reason": "Detector error", "detection_count": 0}
+    s["response_security_time"] = time.perf_counter() - sec_start
 
     # Only do web search for low-confidence cases, not high-confidence bypass results
     need_search = (not s.get("bypass_used") and 
@@ -165,6 +192,111 @@ def n_verify(s: State) -> State:
         s["response_verdict"] = second_pass.get("verdict", s.get("response_verdict", "Unknown"))
         s["response_confidence"] = second_pass.get("confidence", s.get("response_confidence", 0.0))
         s["second_verification_time"] = second_verify_time
+    
+    # If this was a pasted response, synthesize a final verified response
+    if s.get("skip_verification", False):
+        verdict = str(s.get("response_verdict", "Unknown")).strip()
+        v_lc = verdict.lower()
+        # Normalize into categories
+        if ("incorrect" in v_lc) or ("halluc" in v_lc):
+            category = "incorrect"
+        elif "partial" in v_lc:
+            category = "partial"
+        elif "correct" in v_lc:
+            category = "correct"
+        elif ("unverif" in v_lc) or ("unknown" in v_lc) or (not v_lc):
+            category = "unverifiable"
+        else:
+            category = "other"
+
+        original_prompt = s.get("user_prompt", "")
+
+        if category in ("incorrect", "partial"):
+            # Generate corrected response if not already present
+            if not s.get("corrected_llm_response"):
+                corr_start = time.perf_counter()
+                if original_prompt.strip():
+                    correction_prompt = (
+                        "Provide a short, strictly factual answer to the USER PROMPT. "
+                        "Fix inaccuracies in the ORIGINAL RESPONSE. Output only the corrected answer with no preamble.\n\n"
+                        f"USER PROMPT:\n{original_prompt}\n\n"
+                        f"ORIGINAL RESPONSE:\n{r}\n"
+                    )
+                    s["corrected_llm_response"] = call_llm(
+                        correction_prompt,
+                        system_msg="You correct factual errors. Return only the corrected answer.",
+                    )
+                else:
+                    # No prompt provided – correct the pasted response itself
+                    correction_prompt = (
+                        "Rewrite the ORIGINAL RESPONSE to be strictly factual. "
+                        "Replace incorrect or misleading claims with accurate information. "
+                        "If any claim cannot be verified, omit it or mark it as 'Unverifiable'. "
+                        "Return only the corrected answer with no preamble.\n\n"
+                        f"ORIGINAL RESPONSE:\n{r}\n"
+                    )
+                    s["corrected_llm_response"] = call_llm(
+                        correction_prompt,
+                        system_msg="You correct factual errors. Return only the corrected answer.",
+                    )
+                s["correction_time"] = time.perf_counter() - corr_start
+            s["final_llm_response"] = s.get("corrected_llm_response", "")
+            s["final_response_source"] = "corrected"
+        elif category == "correct":
+            # Generate a clean verified answer. If no prompt, transform the pasted response itself.
+            start = time.perf_counter()
+            if original_prompt.strip():
+                sys_msg = (
+                    "Answer the user's prompt concisely and factually in 3-6 short bullet points. "
+                    "Do not include disclaimers or preambles."
+                )
+                s["final_llm_response"] = call_llm(original_prompt, system_msg=sys_msg)
+                s["final_response_source"] = "generated_verified"
+            else:
+                sys_msg = (
+                    "You are a factual editor. Read the RESPONSE and rewrite it into 3-6 concise bullet points. "
+                    "Keep only factual statements; remove fluff; do not ask for any prompt; do not include preambles."
+                )
+                s["final_llm_response"] = call_llm(f"RESPONSE:\n{r}", system_msg=sys_msg)
+                s["final_response_source"] = "generated_verified_from_response"
+            # Reinforce if model asks for a prompt
+            fr_lc = (s.get("final_llm_response") or "").strip().lower()
+            if fr_lc.startswith(("okay, i'm ready", "please provide")) or "provide the prompt" in fr_lc:
+                reinforce_msg = (
+                    sys_msg + " Always proceed using the provided RESPONSE only; never ask the user to provide a prompt."
+                )
+                s["final_llm_response"] = call_llm(f"RESPONSE:\n{r}", system_msg=reinforce_msg)
+            s["final_response_time"] = time.perf_counter() - start
+        elif category == "unverifiable":
+            # Provide a cautious best-effort answer with explicit caveat
+            start = time.perf_counter()
+            if original_prompt.strip():
+                system_msg = (
+                    "The facts cannot be fully verified. Provide a cautious, best-effort answer. "
+                    "Start with a one-line caveat, then give any reliable general guidance."
+                )
+                s["final_llm_response"] = call_llm(original_prompt, system_msg=system_msg)
+                s["final_response_source"] = "generated_unverifiable"
+            else:
+                # No prompt – generate a cautious best-effort rewrite of the RESPONSE
+                system_msg = (
+                    "You are careful and concise. If the RESPONSE cannot be fully verified, start with a brief caveat, "
+                    "then provide general guidance. Do not ask for a prompt."
+                )
+                s["final_llm_response"] = call_llm(f"RESPONSE:\n{r}", system_msg=system_msg)
+                s["final_response_source"] = "generated_unverifiable_from_response"
+            # Reinforce if model asks for a prompt
+            fr_lc = (s.get("final_llm_response") or "").strip().lower()
+            if fr_lc.startswith(("okay, i'm ready", "please provide")) or "provide the prompt" in fr_lc:
+                reinforce_msg = (
+                    system_msg + " Always proceed using the provided RESPONSE only; never ask the user to provide a prompt."
+                )
+                s["final_llm_response"] = call_llm(f"RESPONSE:\n{r}", system_msg=reinforce_msg)
+            s["final_response_time"] = time.perf_counter() - start
+        else:
+            # Default fallback to the pasted response
+            s["final_llm_response"] = r
+            s["final_response_source"] = "pasted"
     
     # Set final verdict for UI (response quality, not prompt risk)
     s["verdict"] = s.get("response_verdict", "Unknown")

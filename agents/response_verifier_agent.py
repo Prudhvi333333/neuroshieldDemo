@@ -5,8 +5,9 @@ from typing import Dict, Optional, Any
 import re
 from .base_agent import BaseAgent, safe_json
 
-_VERDICT_RE = re.compile(r"verdict\s*[:\-]?\s*([A-Za-z ]+)", re.IGNORECASE)
-_CONF_RE = re.compile(r"confidence\s*[:\-]?\s*([0-9.]+)", re.IGNORECASE)
+# Accept colon, hyphen, en dash, em dash as separators
+_VERDICT_RE = re.compile(r"verdict\s*[:\-–—]?\s*([A-Za-z ]+)", re.IGNORECASE)
+_CONF_RE = re.compile(r"confidence\s*[:\-–—]?\s*([0-9.]+)", re.IGNORECASE)
 
 class ResponseVerifierAgent (BaseAgent):
 
@@ -73,9 +74,22 @@ class ResponseVerifierAgent (BaseAgent):
             if reason_line:
                 reason = reason_line.split(":", 1)[1].strip() if ":" in reason_line else reason_line
 
-        # 3) Final guarantee
+        # 3) Final guarantees and heuristics
         if not reason:
             reason = "Verifier did not provide an explicit explanation."
+
+        # If verdict parsing failed, infer from text heuristics
+        v_lc = verdict.lower() if isinstance(verdict, str) else ""
+        if (not v_lc) or (v_lc in ("unverifiable", "unknown")):
+            text_lc = raw_text.lower()
+            if "halluc" in text_lc or "factually incorrect" in text_lc or ("incorrect" in text_lc and "factually" in text_lc):
+                verdict = "Factually incorrect"
+            elif "partially correct" in text_lc or "minor inaccuracies" in text_lc:
+                verdict = "Partially correct"
+            elif "factually correct" in text_lc or "accurate" in text_lc:
+                verdict = "Factually correct"
+            elif "cannot be verified" in text_lc or "unverifiable" in text_lc:
+                verdict = "Unverifiable"
 
         # DEBUG logging – helps diagnose missing reasons in UI
         import logging
