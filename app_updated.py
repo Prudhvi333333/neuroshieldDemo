@@ -52,12 +52,35 @@ def _sanitize_text(text: str) -> str:
     text2 = re.sub(r"&lt;/?[^&]+?&gt;", "", text2)
     # Remove any of our UI-specific class mentions if they leaked as text
     text2 = re.sub(r"section-(card|title|content)|results-container", "", text2, flags=re.IGNORECASE)
+    
+    # Break Markdown code fences so they cannot swallow following HTML
+    # Example: ```sql or ``` becomes `` + ZWSP + `, and ~~~ becomes ~~ + ZWSP + ~
+    def _break_ticks(m: re.Match) -> str:
+        s = m.group(0)
+        return s[:2] + "\u200B" + s[2:]
+    def _break_tildes(m: re.Match) -> str:
+        s = m.group(0)
+        return s[:2] + "\u200B" + s[2:]
+    text2 = re.sub(r"`{3,}", _break_ticks, text2)
+    text2 = re.sub(r"~{3,}", _break_tildes, text2)
+    # Also neutralize horizontal-rule patterns that could create odd spacing
+    # Use a function replacement so we can insert an actual zero-width space without bad escapes
+    text2 = re.sub(
+        r"^(\s*)([-*_]){3,}\s*$",
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(2)}\u200B{m.group(2)}",
+        text2,
+        flags=re.MULTILINE,
+    )
     return text2
 
 def _render_text_block(text: str) -> str:
     safe = _sanitize_text(text)
-    # After sanitization, still escape to avoid any residual angle brackets
-    return f'<div style="margin:0; white-space:pre-wrap;">{html.escape(safe)}</div>'
+    # Return properly escaped text without HTML tags to avoid rendering issues
+    return html.escape(safe)
+
+# Strip leading indentation from multi-line HTML so Markdown doesn't treat lines as code blocks
+def _strip_leading_spaces(html_str: str) -> str:
+    return re.sub(r'^[ \t]+', '', html_str, flags=re.MULTILINE)
 
 # Configure Streamlit runtime options early
 try:
@@ -242,9 +265,8 @@ def load_dark_theme():
     
     .section-card {
         background: linear-gradient(135deg, rgba(45, 45, 68, 0.9) 0%, rgba(62, 62, 94, 0.8) 100%);
-        padding: 2rem;
-        border-radius: 14px;
-        margin-bottom: 2rem;
+        padding: 1.5rem;
+        margin-bottom: 0.75rem;
         border: 1px solid rgba(116, 185, 255, 0.2);
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
         transition: all 0.3s ease;
@@ -262,8 +284,8 @@ def load_dark_theme():
         font-size: 1.3rem;
         font-weight: 700;
         color: #74b9ff;
-        margin-bottom: 1.2rem;
-        padding-bottom: 0.8rem;
+        margin-bottom: 0.6rem;
+        padding-bottom: 0.6rem;
         border-bottom: 2px solid rgba(116, 185, 255, 0.3);
         text-shadow: 0 0 10px rgba(116, 185, 255, 0.3);
         position: relative;
@@ -285,6 +307,8 @@ def load_dark_theme():
         line-height: 1.7;
         font-size: 1.05rem;
         font-weight: 400;
+        white-space: pre-wrap;
+        margin: 0;
     }
     
     .safe-status {
@@ -341,6 +365,17 @@ def load_dark_theme():
     .element-container:has(.stEmpty) {
         display: none !important;
     }
+    
+    /* Hide any residual HTML tags that might leak through */
+    .section-content {
+        font-family: inherit !important;
+    }
+    
+    /* Ensure text content is properly displayed */
+    .section-content {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
 
     /* Prevent stray empty blocks from rendering as dark bars */
     .results-container > div:empty {
@@ -356,6 +391,10 @@ def load_dark_theme():
         content: none !important;
         display: none !important;
     }
+    .top-metrics { margin-bottom: 0.75rem; }
+    
+    /* Reduce bottom space after the last card on the page */
+    .section-card:last-of-type { margin-bottom: 0.25rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -680,10 +719,8 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     
     timing_text = " | ".join(timing_breakdown) if timing_breakdown else "Fast bypass used"
 
-    # Build the entire HTML for results in one go to avoid blank container artifacts
-    parts = []
-    parts.append('<div class="results-container">')
-    parts.append(textwrap.dedent(f'''<div class="top-metrics">
+    # Top metrics
+    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="top-metrics">
         <div class="metric-card">
             <div class="metric-title">Analysis Status</div>
             <div class="metric-value completed">Completed</div>
@@ -700,45 +737,28 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
             <div class="metric-title">Analysis Time</div>
             <div class="metric-value">{results["analysis_time"]:.2f}s</div>
         </div>
-    </div>'''))
+    </div>''')), unsafe_allow_html=True)
 
-    # Classification section
-    parts.append(textwrap.dedent(f'''<div class="section-card">
+    # Classification card
+    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
         <div class="section-title">🔍 Security Classification</div>
         <div class="section-content">{classification_text}</div>
-    </div>'''))
+    </div>''')), unsafe_allow_html=True)
 
-    # Reasoning section - adapt based on analysis type
-    if is_response_analysis:
-        reasoning_title = "🔍 Verification Analysis"
-        # Show the normalized/overridden classification rather than raw model text
-        reasoning_content = classification
-        # Get detailed reason from verifier if available
-        verifier_reason = ""
-        if "raw_verifier_output" in results:
-            raw_output = results["raw_verifier_output"]
-            # Extract reason from verifier output
-            for line in raw_output.split('\n'):
-                if line.strip().lower().startswith('reason:'):
-                    verifier_reason = line.split(':', 1)[1].strip()
-                    break
-        
-        if verifier_reason:
-            reasoning_detail = f"<strong>Verdict:</strong> {reasoning_content}<br><strong>Analysis:</strong> {verifier_reason}"
-        else:
-            reasoning_detail = f"<strong>Verdict:</strong> {reasoning_content}<br><strong>Analysis:</strong> {results.get('reason', 'Response analyzed for factual accuracy')}"
-    else:
-        reasoning_title = "🧠 Security Reasoning"
-        reasoning_detail = f"<strong>Analysis:</strong> {results['reason']}"
-    
-    parts.append(textwrap.dedent(f'''<div class="section-card">
+    # Reasoning card
+    reasoning_title = "🔍 Verification Analysis" if is_response_analysis else "🧠 Security Reasoning"
+    reason_text = (results.get("raw_verifier_output", "") if (is_response_analysis and results.get("raw_verifier_output", "")) else results.get('reason', ''))
+    if is_response_analysis and not reason_text:
+        reason_text = 'Response analyzed for factual accuracy'
+    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
         <div class="section-title">{reasoning_title}</div>
         <div class="section-content">
-            {reasoning_detail}
+            <div><strong>Verdict:</strong> {html.escape(classification)}</div>
+            <div style="margin-top:0.5rem;">{_render_text_block(reason_text)}</div>
         </div>
-    </div>'''))
+    </div>''')), unsafe_allow_html=True)
 
-    # Response-level security check section (works for pasted and generated responses)
+    # Response-level security check
     sec = results.get("response_security") or {}
     if sec:
         sec_cls = str(sec.get("classification", "Safe"))
@@ -780,49 +800,41 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         else:
             friendly_reason = sec_reason or "Security assessment provided."
 
-        det_html = ""
+        det_lines = []
         if det_count > 0:
-            items = []
             for k, v in det.items():
                 if not v:
                     continue
                 label = label_map.get(k, k.replace("_", " ").title())
-                extra = []
+                extras = []
                 if isinstance(v, dict):
                     if "count" in v and v["count"]:
-                        extra.append(f"x{v['count']}")
-                    # show at most a short hint
+                        extras.append(f"x{v['count']}")
                     hint = explain_map.get(k)
                     if hint:
-                        extra.append(hint)
-                suffix = f" – {' '.join(extra)}" if extra else ""
-                items.append(f"<li>{label}{suffix}</li>")
-            if items:
-                det_html = "<ul>" + "".join(items) + "</ul>"
+                        extras.append(hint)
+                suffix = f" – {' '.join(extras)}" if extras else ""
+                det_lines.append(f"• {label}{suffix}")
+        det_text = "\n".join(det_lines)
 
-        # Hide trivial anomaly for safe content to avoid confusion
-        if sec_cls == "Safe" and det_count <= 1 and set(map(str, det.keys())) == {"statistical_anomalies"} and sec_risk < 0.1:
-            det_html = ""
-            friendly_reason = "No security threats detected."
-
-        parts.append(textwrap.dedent(f'''<div class="section-card">
+        st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
             <div class="section-title">🛡️ Response Security Check{' (%.2fs)' % sec_time if sec_time else ''}</div>
             <div class="section-content">
                 <div><strong>Status:</strong> {badge} <span style="margin-left:0.5rem; color:#9ca3af;">(risk {sec_risk:.2f})</span></div>
                 <div style="margin-top:0.5rem;">{_render_text_block(friendly_reason)}</div>
-                {det_html}
+                {(_render_text_block(det_text) if det_text else '')}
             </div>
-        </div>'''))
+        </div>''')), unsafe_allow_html=True)
 
     # Rewrite section (conditional)
     if results["safe_prompt"] and results["safe_prompt"] != prompt:
         rewrite_time_text = f" (Generated in {results.get('rewrite_time', 0):.2f}s)" if results.get('rewrite_time', 0) > 0 else ""
         safe_prompt_display_raw = results["safe_prompt"] if results["safe_prompt"] != "[BLOCKED]" else "⛔ Blocked."
         safe_prompt_display = _render_text_block(safe_prompt_display_raw)
-        parts.append(textwrap.dedent(f'''<div class="section-card">
+        st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
             <div class="section-title">🔄 Rewritten Safe Prompt{rewrite_time_text}</div>
             <div class="section-content">{safe_prompt_display}</div>
-        </div>'''))
+        </div>''')), unsafe_allow_html=True)
 
     # LLM response section (conditional)
     if results.get("llm_response") or results.get("final_llm_response"):
@@ -851,24 +863,24 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
                 if results.get("final_response_time", 0):
                     meta.append(f"<strong>Final:</strong> {results['final_response_time']:.2f}s")
                 meta_html = ("<div style=\"margin-top: 0.75rem; font-size: 0.9rem; color: #6c7293;\">" + " ".join(meta) + "</div>") if meta else ""
-                parts.append(textwrap.dedent(f'''<div class="section-card">
+                st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
                     <div class="section-title">{title}</div>
                     <div class="section-content">{_render_text_block(final_resp)}</div>
                     {meta_html}
-                </div>'''))
+                </div>''')), unsafe_allow_html=True)
                 # (Removed) Original Pasted Response block to prevent confusion and layout issues
             else:
                 # Fallback to corrected or pasted as before
                 if response_category in ("incorrect", "partial") and corrected:
                     corr_time = results.get("correction_time", 0.0)
-                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
                         <div class="section-title">🛠️ Corrected Response (Verified)</div>
                         <div class="section-content">{_render_text_block(corrected)}</div>
                         <div style="margin-top: 0.75rem; font-size: 0.9rem; color: #6c7293;">
                             <strong>Correction Time:</strong> {corr_time:.2f}s
                         </div>
-                    </div>'''))
-                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                    </div>''')), unsafe_allow_html=True)
+                    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
                         <div class="section-title">📥 Original Pasted Response</div>
                         <div class="section-content">
                             <details>
@@ -876,25 +888,19 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
                                 <div style="margin-top: 0.5rem;">{_render_text_block(results["llm_response"])}</div>
                             </details>
                         </div>
-                    </div>'''))
+                    </div>''')), unsafe_allow_html=True)
                 else:
                     suffix = " (Verified Correct)" if response_category == "correct" else (" (Unverifiable)" if response_category == "unverifiable" else "")
-                    parts.append(textwrap.dedent(f'''<div class="section-card">
+                    st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
                         <div class="section-title">🤖 Pasted Response{suffix}</div>
                         <div class="section-content">{_render_text_block(results["llm_response"])}</div>
-                    </div>'''))
+                    </div>''')), unsafe_allow_html=True)
         else:
             # For generated flows, just show the model's response (no verification line for clarity)
-            parts.append(textwrap.dedent(f'''<div class="section-card">
+            st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="section-card">
                 <div class="section-title">🤖 LLM Response{llm_time_text}</div>
                 <div class="section-content">{_render_text_block(results["llm_response"])}</div>
-            </div>'''))
-
-    # Close the container and render once
-    parts.append('</div>')
-    # Join without newlines to ensure Markdown never interprets as a code block
-    final_html = "".join(parts)
-    st.markdown(final_html, unsafe_allow_html=True)
+            </div>''')), unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
@@ -902,3 +908,4 @@ st.markdown("""
     <p>🛡️ NeuroShield - Securing AI interactions with enterprise-grade protection</p>
 </div>
 """, unsafe_allow_html=True)
+
