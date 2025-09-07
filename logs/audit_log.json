@@ -1392,5 +1392,25 @@
     "attack_flags": "{\"prompt_injection\": {\"detected\": true, \"risk_score\": 0.8, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.8, \"attack_types\": [\"prompt_injection\"]}",
     "verdict": "Rejected",
     "context_digest": null
+  },
+  {
+    "timestamp": "2025-09-07T07:09:56.604328",
+    "user_id": null,
+    "prompt": "<!DOCTYPE html>\n<html>\n<head>\n  <title>XSS Example</title>\n</head>\n<body>\n  <div>\n    <!-- Imagine this data comes from user input or an untrusted source -->\n    <p>User's comment: <script>alert('Malicious Script')</script></p>\n  </div>\n  <!-- This user input is not properly sanitized -->\n  <div>\n    <p>User's comment: <?php echo $_GET['comment']; ?></p>\n</div>\n</body>\n</html>",
+    "classification": "Risky",
+    "risk_score": 0.8,
+    "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
+    "verdict": "Factually correct",
+    "context_digest": null
+  },
+  {
+    "timestamp": "2025-09-07T07:10:36.494758",
+    "user_id": null,
+    "prompt": "<!DOCTYPE html>\n<html>\n<head>\n  <title>XSS Example</title>\n</head>\n<body>\n  <div>\n    <!-- Imagine this data comes from user input or an untrusted source -->\n    <p>User's comment: <script>alert('Malicious Script')</script></p>\n  </div>\n  <!-- This user input is not properly sanitized -->\n  <div>\n    <p>User's comment: <?php echo $_GET['comment']; ?></p>\n</div>\n</body>\n</html>\n\nhow can I integrate this html code  in the current appplication UI to get the user prompts ",
+    "classification": "Risky",
+    "risk_score": 0.8,
+    "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
+    "verdict": "Factually correct",
+    "context_digest": null
   }
 ]
