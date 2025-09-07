@@ -266,7 +266,8 @@ def load_dark_theme():
     .section-card {
         background: linear-gradient(135deg, rgba(45, 45, 68, 0.9) 0%, rgba(62, 62, 94, 0.8) 100%);
         padding: 1.5rem;
-        margin-bottom: 0.75rem;
+        margin-bottom: 2.25rem;
+        border-radius: 14px;
         border: 1px solid rgba(116, 185, 255, 0.2);
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
         transition: all 0.3s ease;
@@ -304,7 +305,7 @@ def load_dark_theme():
     
     .section-content {
         color: #ffffff;
-        line-height: 1.7;
+        line-height: 1.6;
         font-size: 1.05rem;
         font-weight: 400;
         white-space: pre-wrap;
@@ -391,10 +392,12 @@ def load_dark_theme():
         content: none !important;
         display: none !important;
     }
-    .top-metrics { margin-bottom: 0.75rem; }
+    .top-metrics { margin-bottom: 1.8rem; }
     
+    /* Ensure a small gap between consecutive cards */
+    .section-card + .section-card { margin-top: 1.5rem; }
     /* Reduce bottom space after the last card on the page */
-    .section-card:last-of-type { margin-bottom: 0.25rem; }
+    .section-card:last-of-type { margin-bottom: 0.5rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -735,7 +738,7 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         </div>
         <div class="metric-card">
             <div class="metric-title">Analysis Time</div>
-            <div class="metric-value">{results["analysis_time"]:.2f}s</div>
+            <div class="metric-value">{results.get("analysis_time", 0.0):.2f}s</div>
         </div>
     </div>''')), unsafe_allow_html=True)
 
@@ -754,7 +757,7 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         <div class="section-title">{reasoning_title}</div>
         <div class="section-content">
             <div><strong>Verdict:</strong> {html.escape(classification)}</div>
-            <div style="margin-top:0.5rem;">{_render_text_block(reason_text)}</div>
+            <div style="margin-top:0.25rem;">{_render_text_block(reason_text)}</div>
         </div>
     </div>''')), unsafe_allow_html=True)
 
@@ -821,7 +824,7 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
             <div class="section-title">🛡️ Response Security Check{' (%.2fs)' % sec_time if sec_time else ''}</div>
             <div class="section-content">
                 <div><strong>Status:</strong> {badge} <span style="margin-left:0.5rem; color:#9ca3af;">(risk {sec_risk:.2f})</span></div>
-                <div style="margin-top:0.5rem;">{_render_text_block(friendly_reason)}</div>
+                <div style="margin-top:0.25rem;">{_render_text_block(friendly_reason)}</div>
                 {(_render_text_block(det_text) if det_text else '')}
             </div>
         </div>''')), unsafe_allow_html=True)
