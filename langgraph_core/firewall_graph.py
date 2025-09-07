@@ -80,6 +80,9 @@ def n_analysis(s: State) -> State:
         r"pretend.*(cybercriminal|hacker)",
         r"apprentice.*(phish|phishing|scam|fraud|hack)",
         r"instructions.*(bank\s+customers).*phish",
+        # Exfiltration and secret-theft
+        r"(exfiltrat(e|ion)|dump|enumerate|list).*(env(ironment)?\s*(vars|variables)?|secrets|credentials|tokens|keys|passwords|api\s*key|access\s*key|private\s*key|ssh\s*key)",
+        r"write.*python.*(exfiltrat(e|ion)|enumerate|dump).*(env|environment|secrets|credentials|tokens|keys|passwords)",
     ]
     if any(re.search(p, txt_lc, re.IGNORECASE) for p in explicit_block_patterns):
         s["classification"] = "Blocked"

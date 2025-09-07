@@ -48,6 +48,16 @@ class AdvancedClassifier:
                 'phishing', 'scam', 'fraud', 'malware', 'virus', 'trojan',
                 'exploit', 'vulnerability', 'attack', 'injection', 'xss'
             ],
+            # Exfiltration and secret theft
+            'exfiltration_verbs': [
+                'exfiltrate', 'exfiltration', 'enumerate', 'dump', 'scrape',
+                'harvest', 'collect', 'extract', 'steal', 'leak', 'expose', 'list'
+            ],
+            'secret_targets': [
+                'secret', 'secrets', 'credential', 'credentials', 'token', 'tokens', 'key', 'keys',
+                'password', 'passwords', 'apikey', 'api', 'access', 'private', 'ssh',
+                'env', 'environment', 'variable', 'variables', 'envvars', 'envvar'
+            ],
             
             # Security bypass
             'security_bypass': [
@@ -125,6 +135,17 @@ class AdvancedClassifier:
         if malicious_words:
             risk_score += 0.8
             risk_reasons.append(f"Malicious keywords: {malicious_words}")
+
+        # Exfiltration of secrets/credentials
+        exfil_verbs = words.intersection(self.risk_keywords['exfiltration_verbs'])
+        secret_words = words.intersection(self.risk_keywords['secret_targets'])
+        if exfil_verbs and secret_words:
+            risk_score += 0.85
+            risk_reasons.append(f"Exfiltration intent: {exfil_verbs} + {secret_words}")
+        # Special case: language hints with exfiltration
+        if (('write' in words or 'python' in words or 'script' in words) and (exfil_verbs and secret_words)):
+            risk_score += 0.15
+            risk_reasons.append("Code-assisted exfiltration request")
         
         # Security bypass indicators
         security_words = words.intersection(self.risk_keywords['security_bypass'])

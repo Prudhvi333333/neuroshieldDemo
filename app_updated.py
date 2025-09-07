@@ -697,17 +697,35 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
         else:
             classification_text = f'<span class="neutral-status">🔍 Response Verification:</span> {classification}'
     else:
-        # For prompt analysis, show security threats
+        # For prompt analysis, drive banner primarily from classification/risk, and enrich with attack types
         attack_types = []
-        if results["attack_detection"]:
+        if results.get("attack_detection"):
             for attack_type, details in results["attack_detection"].items():
                 if isinstance(details, dict) and details.get("detected"):
                     attack_types.append(attack_type.replace("_", " ").title())
-        
-        if attack_types:
-            classification_text = f'<span class="threat-status">🚨 Threats Detected:</span> {", ".join(attack_types)}'
+
+        cls = str(results.get("final_decision", "Unknown") or "Unknown")
+        rs = float(results.get("risk_score", 0.0) or 0.0)
+        reason = html.escape(str(results.get("reason", "")))
+        is_blocked = (cls == "Blocked") or (results.get("final_prompt") == "[BLOCKED]") or (rs >= 0.85)
+        is_risky = (cls == "Risky") or (0.6 <= rs < 0.85)
+
+        if is_blocked:
+            prefix = '<span class="threat-status">⛔ Blocked:</span>'
+            extra = f" Reason: {reason}" if reason else ""
+            threats = f" Threats: {', '.join(attack_types)}" if attack_types else ""
+            classification_text = f"{prefix}{extra}{threats}"
+        elif is_risky:
+            prefix = '<span class="warning-status">⚠️ Risky:</span>'
+            extra = f" Reason: {reason}" if reason else ""
+            threats = f" Threats: {', '.join(attack_types)}" if attack_types else ""
+            classification_text = f"{prefix}{extra}{threats}"
         else:
-            classification_text = f'<span class="safe-status">✅ Security Analysis Complete:</span> Content passed all security checks successfully'
+            # Safe/default
+            if attack_types:
+                classification_text = f"<span class=\"neutral-status\">🔍 Observations:</span> {', '.join(attack_types)}"
+            else:
+                classification_text = f'<span class="safe-status">✅ Security Analysis Complete:</span> Content passed all security checks successfully'
     
     # Timing breakdown (currently for future use)
     timing_breakdown = []

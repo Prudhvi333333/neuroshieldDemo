@@ -44,7 +44,11 @@ class FastClassifier:
         r"(phish|phishing).*(how\s*to|instructions|guide|steps|teach|instruct)",
         r"pretend.*(cybercriminal|hacker)",
         r"apprentice.*(phish|phishing|scam|fraud)",
-        r"instructions.*(bank\s+customers).*phish"
+        r"instructions.*(bank\s+customers).*phish",
+        # Data exfiltration of secrets/credentials
+        r"(exfiltrat(e|ion)).*(secret|credential|password|token|key|environment|env)",
+        r"(enumerate|dump|list).*(env(ironment)?\s*(vars|variables)?|secrets|credentials|tokens|keys)",
+        r"write.*python.*(exfiltrat(e|ion)|enumerate|dump).*(env(ironment)?|secrets|credentials|tokens|keys)"
     ]
     
     # High-confidence risky patterns
@@ -80,11 +84,15 @@ class FastClassifier:
         
         # Enhanced risky pattern detection
         risky_keywords = [
-            "password", "hack", "bypass", "exploit", "vulnerability", 
+            "password", "hack", "bypass", "exploit", "vulnerability",
             "social engineering", "phishing", "malware", "virus",
             "illegal", "fraud", "scam", "steal", "break into",
             "security system", "firewall", "penetration", "backdoor",
-            "convince someone", "manipulate", "trick", "deceive"
+            "convince someone", "manipulate", "trick", "deceive",
+            # Exfiltration/secret-theft
+            "exfiltrate", "exfiltration", "enumerate", "dump", "secrets",
+            "credentials", "tokens", "keys", "api key", "access key",
+            "private key", "ssh key", "environment secrets", "env vars", "environment variables"
         ]
         
         # Check for risky patterns and keywords
@@ -109,32 +117,38 @@ class FastClassifier:
                     "confidence": 0.8
                 }
         
-        # Enhanced safe pattern detection
+        # Enhanced safe pattern detection (guarded by danger terms)
         safe_keywords = [
             "write", "story", "explain", "what is", "how does", 
             "tutorial", "guide", "learn", "teach", "help me understand",
             "create", "make", "build", "design", "develop"
         ]
+        danger_terms = [
+            "exfiltrate", "exfiltration", "enumerate", "dump", "secrets",
+            "credentials", "tokens", "keys", "password", "private key",
+            "ssh key", "api key", "access key", "hack", "bypass", "exploit",
+            "vulnerability", "phishing", "malware", "virus", "fraud", "scam", "steal"
+        ]
         
-        # Check if prompt starts with safe keywords
-        for keyword in safe_keywords:
-            if prompt_lower.startswith(keyword) or f" {keyword} " in prompt_lower:
-                return {
-                    "classification": "Safe",
-                    "risk_score": 0.2,
-                    "reason": f"Educational/creative content detected: '{keyword}'",
-                    "bypass_used": True,
-                    "confidence": 0.85
-                }
+        # Check if prompt starts with safe keywords (only if no danger terms present)
+        if not any(term in prompt_lower for term in danger_terms):
+            for keyword in safe_keywords:
+                if prompt_lower.startswith(keyword) or f" {keyword} " in prompt_lower:
+                    return {
+                        "classification": "Safe",
+                        "risk_score": 0.2,
+                        "reason": f"Educational/creative content detected: '{keyword}'",
+                        "bypass_used": True,
+                        "confidence": 0.85
+                    }
         
-        # Check for obvious safe patterns first
-        for pattern in self.safe_patterns:
-            if pattern in prompt_lower:
+        # Check for obvious safe patterns (regex) only if no danger terms present
+        if not any(term in prompt_lower for term in danger_terms):
+            if self.safe_regex.search(prompt_lower):
                 return {
                     "classification": "Safe",
                     "risk_score": 0.1,
-                    "reason": f"Safe pattern detected: {pattern}",
-                    "pattern_matched": pattern,
+                    "reason": "Safe pattern detected",
                     "layer": "fast_classifier"
                 }
         

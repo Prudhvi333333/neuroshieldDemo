@@ -32,6 +32,13 @@ PROMPT: {prompt}"""
         
         # Check for bypass first
         should_bypass, result = intelligent_bypass.analyze_with_bypass(prompt)
+        # Capture multilingual/semantic metadata even if we don't bypass
+        lang_meta: Dict[str, Any] = {}
+        if isinstance(result, dict):
+            for k in ("language", "language_confidence", "normalized_text", "semantic_intents"):
+                if k in result:
+                    lang_meta[k] = result[k]
+
         if should_bypass:
             if "classification" in result and result["classification"] in ["Safe", "Risky", "Blocked"]:
                 print(f"DEBUG bypass result: {result}")
@@ -45,7 +52,9 @@ PROMPT: {prompt}"""
                 if attack_result.get("attack_types"):
                     attack_types = ", ".join(attack_result["attack_types"])
                     result["reason"] = f"{result.get('reason', 'Pattern detection')} - Attack types: {attack_types}"
-                
+                # Preserve language/intents metadata
+                if lang_meta:
+                    result.update(lang_meta)
                 return result
         
         # Layer 3: LLM analysis with robust parsing
@@ -111,7 +120,8 @@ PROMPT: {prompt}"""
                 "reason": reason,
                 "attack_detection": attack_result,
                 "llm_classification": True,
-                "bypass_used": False
+                "bypass_used": False,
+                **lang_meta
             }
             
         except Exception as e:
