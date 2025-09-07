@@ -73,6 +73,20 @@ def n_analysis(s: State) -> State:
     ]
     txt_lc = s["user_prompt"].lower()
     escalated = False
+
+    # CRITICAL: Explicit malicious-instruction patterns should be Blocked, not Rewritten
+    explicit_block_patterns = [
+        r"(how\s*to|give\s+instructions|step[-\s]?by[-\s]?step|guide|teach|instruct).*(phish|phishing|scam|fraud|hack|malware|steal|password|bank)",
+        r"pretend.*(cybercriminal|hacker)",
+        r"apprentice.*(phish|phishing|scam|fraud|hack)",
+        r"instructions.*(bank\s+customers).*phish",
+    ]
+    if any(re.search(p, txt_lc, re.IGNORECASE) for p in explicit_block_patterns):
+        s["classification"] = "Blocked"
+        s["risk_score"] = max(BLOCK_T, 0.95)
+        s.setdefault("reason", "Explicit malicious-instruction intent detected")
+        print("DEBUG n_analysis: Escalated to Blocked due to explicit malicious instruction pattern")
+        return s
     if any(k in txt_lc for k in keywords) and s.get("risk_score", 0) < RISKY_T:
         escalated = True
         s["classification"] = "Risky"
@@ -96,8 +110,56 @@ def n_analysis(s: State) -> State:
  
 def n_rewrite(s: State) -> State:
     rewrite_start = time.perf_counter()
-    s["final_prompt"] = rewriter.run(s["user_prompt"])
+    rewritten = rewriter.run(s["user_prompt"]) or ""
     s["rewrite_time"] = time.perf_counter() - rewrite_start
+
+    # Validate the rewritten prompt. If still unsafe, block instead of proceeding.
+    unsafe = False
+    rl = rewritten.lower()
+
+    # If the rewriter itself flagged it as unsafe
+    if "[blocked" in rl:
+        unsafe = True
+    else:
+        # Quick pattern-based screening for illicit instruction intent
+        rewrite_block_patterns = [
+            r"(how\s*to|give\s+instructions|step[-\s]?by[-\s]?step|guide|teach|instruct).*(phish|phishing|scam|fraud|hack|malware|steal|password|bank)",
+            r"pretend.*(cybercriminal|hacker)",
+            r"apprentice.*(phish|phishing|scam|fraud|hack)",
+            r"instructions.*(bank\s+customers).*phish",
+            r"(manipulate|trick|deceive).*(victim|targets|people)",
+        ]
+        if any(re.search(p, rl, re.IGNORECASE) for p in rewrite_block_patterns):
+            unsafe = True
+
+        # Heuristic check with AttackDetectionAgent
+        if not unsafe:
+            try:
+                from agents.attack_detection_agent import AttackDetectionAgent
+                det = AttackDetectionAgent().run(rewritten)
+                overall = float(det.get("overall_risk_score", 0.0) or 0.0)
+                if overall >= 0.6 or any(isinstance(v, dict) and v.get("detected") for v in det.values()):
+                    unsafe = True
+            except Exception:
+                pass
+
+        # Advanced classifier on the rewritten prompt
+        if not unsafe:
+            try:
+                from utils.advanced_classifier import advanced_classifier
+                adv = advanced_classifier.classify_prompt(rewritten, risk_threshold=0.5, safe_threshold=0.2)
+                if adv and (adv.get("classification") in ("Risky", "Blocked") or float(adv.get("risk_score", 0.0) or 0.0) >= 0.6):
+                    unsafe = True
+            except Exception:
+                pass
+
+    if unsafe:
+        s["final_prompt"] = "[BLOCKED]"
+        s["classification"] = "Blocked"
+        s["risk_score"] = max(BLOCK_T, float(s.get("risk_score", 0.9) or 0.9))
+        s.setdefault("reason", "Rewrite remains unsafe – blocked")
+    else:
+        s["final_prompt"] = rewritten
     return s
  
  
@@ -112,6 +174,49 @@ def n_block(s: State) -> State:
  
  
 def n_llm(s: State) -> State:
+    # If the prompt is blocked, do not generate a response
+    if s.get("final_prompt") == "[BLOCKED]":
+        s["llm_response"] = "⛔ Blocked."
+        s["llm_time"] = 0.0
+        return s
+
+    # Pre-LLM safety gate: re-validate the final prompt before any generation
+    try:
+        fp = (s.get("final_prompt") or "").strip()
+        if fp:
+            unsafe = False
+            # Attack detection
+            try:
+                from agents.attack_detection_agent import AttackDetectionAgent
+                det = AttackDetectionAgent().run(fp)
+                overall = float(det.get("overall_risk_score", 0.0) or 0.0)
+                if overall >= 0.6 or any(isinstance(v, dict) and v.get("detected") for v in det.values()):
+                    unsafe = True
+            except Exception:
+                pass
+
+            # Advanced classifier as a secondary check
+            if not unsafe:
+                try:
+                    from utils.advanced_classifier import advanced_classifier
+                    adv = advanced_classifier.classify_prompt(fp, risk_threshold=0.5, safe_threshold=0.2)
+                    if adv and (adv.get("classification") in ("Risky", "Blocked") or float(adv.get("risk_score", 0.0) or 0.0) >= 0.6):
+                        unsafe = True
+                except Exception:
+                    pass
+
+            if unsafe:
+                s["final_prompt"] = "[BLOCKED]"
+                s["classification"] = "Blocked"
+                s["risk_score"] = max(BLOCK_T, float(s.get("risk_score", 0.9) or 0.9))
+                s.setdefault("reason", "Pre-LLM safety gate blocked unsafe prompt")
+                s["llm_response"] = "⛔ Blocked."
+                s["llm_time"] = 0.0
+                return s
+    except Exception:
+        # Fail-safe: proceed to LLM only if safety checks don't error fatally
+        pass
+
     if not s.get("llm_response"):
         llm_start = time.perf_counter()
         s["llm_response"] = call_llm(

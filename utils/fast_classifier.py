@@ -38,7 +38,13 @@ class FastClassifier:
         r"override.*programming",
         r"act.*as.*if.*no.*restrictions",
         r"system.*prompt",
-        r"jailbreak.*mode"
+        r"jailbreak.*mode",
+        # Explicit instruction to commit or teach criminal activity
+        r"(how\s*to|give\s+instructions|step[-\s]?by[-\s]?step|guide|teach|instruct).*(phish|phishing)",
+        r"(phish|phishing).*(how\s*to|instructions|guide|steps|teach|instruct)",
+        r"pretend.*(cybercriminal|hacker)",
+        r"apprentice.*(phish|phishing|scam|fraud)",
+        r"instructions.*(bank\s+customers).*phish"
     ]
     
     # High-confidence risky patterns

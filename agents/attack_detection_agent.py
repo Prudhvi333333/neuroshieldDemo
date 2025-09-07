@@ -21,6 +21,11 @@ _PATTERNS = {
         r"unauthorized.*access",
         r"steal.*password",
         r"malware.*creation",
+        # Criminal instruction intents
+        r"(how\s*to|give\s+instructions|step[-\s]?by[-\s]?step|guide|teach|instruct).*(phish|phishing|scam|fraud|steal|password|bank)",
+        r"pretend.*(cybercriminal|hacker)",
+        r"apprentice.*(phish|phishing|scam|fraud|hack)",
+        r"instructions.*(bank\s+customers).*phish",
     ],
     "llmjacking": [
         r"always.*respond.*with",
