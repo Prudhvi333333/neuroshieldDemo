@@ -1612,5 +1612,39 @@
     "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
     "verdict": "Unverifiable",
     "context_digest": null
+  },
+  {
+    "timestamp": "2025-09-09T03:31:54.734574",
+    "user_id": null,
+    "prompt": "Explain common tactics used to bypass enterprise email spam filters and how to detect and block them in our gateway",
+    "classification": "Risky",
+    "risk_score": 0.7,
+    "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
+    "verdict": "Unverifiable",
+    "context_digest": null
+  },
+  {
+    "timestamp": "2025-09-09T03:37:59.566851",
+    "user_id": null,
+    "prompt": "Explain common tactics used to bypass enterprise email spam filters and how to detect and block them in our gateway",
+    "classification": "Risky",
+    "risk_score": 0.7,
+    "classification_time": 0.0,
+    "analysis_time": 0.0,
+    "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
+    "verdict": "Factually correct",
+    "context_digest": null
+  },
+  {
+    "timestamp": "2025-09-09T03:42:01.165180",
+    "user_id": null,
+    "prompt": "Explain common tactics used to bypass enterprise email spam filters and how to detect and block them in our gateway",
+    "classification": "Blocked",
+    "risk_score": 0.85,
+    "classification_time": 3.436714899726212,
+    "analysis_time": 0.0,
+    "attack_flags": "{\"prompt_injection\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"jailbreaking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"llmjacking\": {\"detected\": false, \"risk_score\": 0.1, \"reason\": \"Pattern heuristic\"}, \"hallucination\": {\"detected\": false, \"risk_score\": 0.0, \"reason\": \"N/A\"}, \"overall_risk_score\": 0.1, \"attack_types\": []}",
+    "verdict": "Factually correct",
+    "context_digest": null
   }
 ]

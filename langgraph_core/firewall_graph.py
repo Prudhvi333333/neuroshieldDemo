@@ -28,6 +28,7 @@ class State(TypedDict, total=False):
     classification: str
     risk_reason: str
     risk_score: float
+    classification_time: float
     final_prompt: str
     llm_response: str
     verdict: str
@@ -57,6 +58,7 @@ audit = AuditChainAgent()
  
  
 def n_analysis(s: State) -> State:
+    decision_start = time.perf_counter()
     analysis_result = analysis.run(s["user_prompt"])
     s.update(analysis_result)
     
@@ -89,6 +91,8 @@ def n_analysis(s: State) -> State:
         s["risk_score"] = max(BLOCK_T, 0.95)
         s.setdefault("reason", "Explicit malicious-instruction intent detected")
         print("DEBUG n_analysis: Escalated to Blocked due to explicit malicious instruction pattern")
+        s["classification_time"] = time.perf_counter() - decision_start
+        print(f"DEBUG n_analysis timing: classification_time={s['classification_time']:.4f}s")
         return s
     if any(k in txt_lc for k in keywords) and s.get("risk_score", 0) < RISKY_T:
         escalated = True
@@ -108,6 +112,8 @@ def n_analysis(s: State) -> State:
         s["escalated"] = True
     
     print(f"DEBUG n_analysis final: Classification={s.get('classification')}, Risk={s.get('risk_score')}")
+    s["classification_time"] = time.perf_counter() - decision_start
+    print(f"DEBUG n_analysis timing: classification_time={s['classification_time']:.4f}s")
     return s
  
  

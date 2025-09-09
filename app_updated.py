@@ -518,10 +518,6 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
                 <div class="metric-title">Risk Score</div>
                 <div class="metric-value">0.000</div>
             </div>
-            <div class="metric-card">
-                <div class="metric-title">Analysis Time</div>
-                <div class="metric-value">0.00s</div>
-            </div>
         </div>
         ''', unsafe_allow_html=True)
         
@@ -573,10 +569,6 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
                 <div class="metric-title">Risk Score</div>
                 <div class="metric-value">{current_accumulated_state.get("risk_score", 0.0):.3f}</div>
             </div>
-            <div class="metric-card">
-                <div class="metric-title">Analysis Time</div>
-                <div class="metric-value">{time.perf_counter() - start_time:.2f}s</div>
-            </div>
         </div>
         ''', unsafe_allow_html=True)
         
@@ -599,7 +591,8 @@ if st.button("🚀 Analyze Security", disabled=analyze_button_disabled, key="ana
             "safe_prompt": current_accumulated_state.get("final_prompt", ""),
             "llm_response": current_accumulated_state.get("llm_response", ""),
             "bypass_used": current_accumulated_state.get("bypass_used", False),
-            "analysis_time": analysis_time,
+            "classification_time": current_accumulated_state.get("classification_time", 0.0),
+            "analysis_time": current_accumulated_state.get("analysis_time", 0.0),
             "rewrite_time": current_accumulated_state.get("rewrite_time", 0.0),
             "llm_time": current_accumulated_state.get("llm_time", 0.0),
             "verification_time": current_accumulated_state.get("verification_time", 0.0),
@@ -741,6 +734,34 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
     timing_text = " | ".join(timing_breakdown) if timing_breakdown else "Fast bypass used"
 
     # Top metrics
+    # Build timing cards dynamically based on analysis type
+    if is_response_analysis:
+        # Response verification classification time and response risk calc time
+        vt = float(results.get("verification_time", 0.0) or 0.0)
+        rst = float(results.get("response_security_time", 0.0) or 0.0)
+        vt_disp = (f"{vt*1000:.0f}ms" if vt < 1.0 else f"{vt:.2f}s")
+        rst_disp = (f"{rst*1000:.0f}ms" if rst < 1.0 else f"{rst:.2f}s")
+        extra_cards_html = f'''
+            <div class="metric-card">
+                <div class="metric-title">Verification Time</div>
+                <div class="metric-value">{vt_disp}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Response Risk Time</div>
+                <div class="metric-value">{rst_disp}</div>
+            </div>
+        '''
+    else:
+        # Prompt classification + risk decision time
+        ct = float(results.get("classification_time", 0.0) or 0.0)
+        ct_disp = (f"{ct*1000:.0f}ms" if ct < 1.0 else f"{ct:.2f}s")
+        extra_cards_html = f'''
+            <div class="metric-card">
+                <div class="metric-title">Decision Time</div>
+                <div class="metric-value">{ct_disp}</div>
+            </div>
+        '''
+
     st.markdown(_strip_leading_spaces(textwrap.dedent(f'''<div class="top-metrics">
         <div class="metric-card">
             <div class="metric-title">Analysis Status</div>
@@ -754,10 +775,7 @@ if st.session_state.analysis_complete and st.session_state.analysis_results:
             <div class="metric-title">Risk Score</div>
             <div class="metric-value">{risk_score:.3f}</div>
         </div>
-        <div class="metric-card">
-            <div class="metric-title">Analysis Time</div>
-            <div class="metric-value">{results.get("analysis_time", 0.0):.2f}s</div>
-        </div>
+        {extra_cards_html}
     </div>''')), unsafe_allow_html=True)
 
     # Classification card

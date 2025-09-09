@@ -26,7 +26,7 @@ class AuditChainAgent:
             return
  
         # Construct the BigQuery row according to your provided schema
-        # Schema fields: timestamp, user_id, prompt, classification, risk_score, attack_flags, verdict, context_digest
+        # Schema fields: timestamp, user_id, prompt, classification, risk_score, classification_time, analysis_time, attack_flags, verdict, context_digest
         
         # Populate attack_flags (JSON Type in BQ)
         attack_detection_data = evt.get("attack_detection", {})
@@ -40,6 +40,8 @@ class AuditChainAgent:
             "prompt": evt.get("user_prompt", ""), # STRING - Maps to LangGraph's user_prompt
             "classification": evt.get("classification", ""), # STRING
             "risk_score": float(evt.get("risk_score", 0.0)), # FLOAT - Ensure type conversion
+            "classification_time": float(evt.get("classification_time", 0.0)), # FLOAT - Time to reach classification/risk
+            "analysis_time": float(evt.get("analysis_time", 0.0)), # FLOAT - Internal analysis timing (if available)
             "attack_flags": json.dumps(attack_detection_data), # JSON - Serialize dict to JSON string
             "verdict": evt.get("verdict", ""), # STRING
             "context_digest": None # STRING, NULLABLE - Not available in current 'State', set to None
