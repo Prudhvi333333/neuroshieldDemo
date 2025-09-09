@@ -398,6 +398,87 @@ This scenario shows how Layer 2 ML catches benign‑sounding requests that attem
 
 ---
 
+## 🧩 Layer‑2 modules used in this scenario — what runs where (with the OTP/code example)
+
+Below are the L2 components that participate in the decision, with code references and their signal for the example prompt:
+
+1) `text_normalizer.normalize_and_tag()` — ML semantic intents
+- File: `utils/text_normalizer.py`
+- What it does:
+  - Detects language (heuristic + optional LLM fallback)
+  - Normalizes user text into concise English intent using an LLM
+  - Calls the LLM to assign semantic intent confidences in [0..1] for categories like `social_engineering`, `credential_theft`, etc.
+- Why it’s ML: The LLM reasons over meaning and context (not just keywords) to infer intent and risk themes.
+- Example output for the OTP/code request:
+  - `language`: `"en"`
+  - `normalized_text`: "Internal guide for account recovery; suggests asking users for a 6‑digit code to speed up help."
+  - `semantic_intents` (confidences): `{ social_engineering: 0.68, credential_theft: 0.41, exfiltration: 0.08, llm_jacking: 0.05 }`
+
+2) `advanced_classifier.classify_prompt()` — Feature co‑occurrence (deterministic)
+- File: `utils/advanced_classifier.py`
+- What it does: Applies weighted feature rules (e.g., instruction_bypass + targets, exfiltration + secret_targets, security_bypass) over extracted keywords.
+- Why it’s useful: Fast, transparent reasoning; catches clear patterns with low latency. Not trained ML, but a reliable feature-based risk signal.
+- Example output for the OTP/code request:
+  - The text avoids explicit “phishing/steal/password” words. Co‑occurrence features are weak → `risk_score ≈ 0.10–0.25`.
+  - Reason: few high-risk pairs; polite/business phrasing reduces direct feature activation.
+
+3) `intelligent_bypass.analyze_with_bypass()` — L2 orchestration and risk math
+- File: `utils/intelligent_bypass.py`
+- What it does:
+  - Calls `normalize_and_tag(..., use_llm=True)` to get `semantic_intents` (ML)
+  - Calls `advanced_classifier.classify_prompt(normalized_text)` to get feature risk (deterministic)
+  - Combines conservatively: `combined_risk = max(sem_max, l2_risk)`
+  - Thresholds: `≥ 0.85 → Blocked`, `≥ 0.60 → Risky (Rewrite)`, `< 0.20 (English only) → Safe`
+- Example risk math:
+  - `sem_max = 0.68` (from `social_engineering`)
+  - `l2_risk ≈ 0.20` (feature-based)
+  - `combined_risk = max(0.68, 0.20) = 0.68` → Classification: `Risky` → action: `Rewrite`
+
+4) (Optional, pluggable) `offline_classifier.classify_prompt()` — TF‑IDF + cosine similarity
+- File: `utils/offline_classifier.py`
+- What it does:
+  - Builds a TF‑IDF vector for the input and compares it via cosine similarity to pre‑vectorized malicious and safe pattern vectors.
+  - Cosine similarity: `cos(a, b) = dot(a, b) / (||a|| · ||b||)`
+  - If `max_malicious_sim > threshold` and `> max_safe_sim`, it returns a Risky classification with `risk_score ≈ min(0.9, 2*max_malicious_sim)`; if the reverse holds, returns Safe; else returns `None` (low confidence).
+- Why it helps: Adds a classical ML view that detects paraphrases similar to known threat patterns, even without exact keywords.
+- Example (illustrative) for the OTP/code request:
+  - The prompt’s vector may show moderate similarity to “social engineering” and “phishing template” patterns because of words like `security`, `code`, `account`, and “ask/assist” phrasing.
+  - If malicious similarity slightly wins (e.g., 0.28 vs 0.22, threshold 0.25), it would emit a Risky result (`risk_score ≈ 0.56`). If it does not win clearly, it returns `None` and defers.
+  - Note: This module is available and can be integrated into the L2 combine step; it is not mandatory for the current default routing.
+
+5) (Optional, pluggable) `ml_classifier.classify_prompt()` — Embeddings + cosine similarity
+- File: `utils/ml_classifier.py`
+- What it does: Uses SentenceTransformer embeddings to measure semantic similarity to curated malicious/safe examples; produces a classification when confidence exceeds a threshold.
+- Why it helps: Captures semantic paraphrases robustly. Useful as an additional ML vote in the L2 combine.
+- Note: This is optional; if enabled, its score can be folded into the conservative combine.
+
+Putting it together — end‑to‑end for the OTP/code example
+
+```python
+# Signals
+sem_max = 0.68                     # from text_normalizer.classify_intents_llm()
+l2_risk = 0.20                      # from advanced_classifier.classify_prompt()
+offline_risk = 0.56  # optional     # from offline_classifier (if max_malicious_sim slightly > threshold)
+
+# Conservative combination (current default uses at least the first two signals)
+combined_risk = max(sem_max, l2_risk)                    # = 0.68
+# If optional modules are enabled, fold them in safely:
+# combined_risk = max(sem_max, l2_risk, offline_risk, emb_risk_if_enabled)
+
+# Routing
+if combined_risk >= 0.85:
+    cls = "Blocked"
+elif combined_risk >= 0.60:
+    cls = "Risky"   # → Rewrite
+else:
+    cls = "Safe"    # English-only low risk
+```
+
+Key takeaway for technical audiences
+- Layer‑2 is not “just keywords.” The decisive lift in this example comes from ML semantic intent scoring (LLM) that recognizes the OTP/6‑digit code request pattern as social‑engineering risk. Feature rules are intentionally conservative and provide a secondary view. Optionally, TF‑IDF cosine similarity and embeddings can be added as additional ML votes to strengthen L2 decisions on nuanced prompts.
+
+---
+
 ## 📈 Performance Characteristics
 
 ### **Layer 2 ML Performance Metrics**
